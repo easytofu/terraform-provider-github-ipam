@@ -23,7 +23,7 @@ func main() {
 	flag.Parse()
 
 	opts := providerserver.ServeOpts{
-		Address: "registry.opentofu.org/easytofu/gitipam",
+		Address: "registry.opentofu.org/easytofu/github-ipam",
 		Debug:   debug,
 	}
 

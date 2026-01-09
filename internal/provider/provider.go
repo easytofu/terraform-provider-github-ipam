@@ -46,7 +46,7 @@ func New(version string) func() provider.Provider {
 }
 
 func (p *GitIPAMProvider) Metadata(ctx context.Context, req provider.MetadataRequest, resp *provider.MetadataResponse) {
-	resp.TypeName = "gitipam"
+	resp.TypeName = "github-ipam"
 	resp.Version = p.version
 }
 
