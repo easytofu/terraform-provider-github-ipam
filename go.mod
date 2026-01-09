@@ -1,6 +1,6 @@
 module github.com/easytofu/terraform-provider-ipam-github
 
-go 1.25.5
+go 1.24.0
 
 require (
 	github.com/apparentlymart/go-cidr v1.1.0
