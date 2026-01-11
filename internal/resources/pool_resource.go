@@ -12,6 +12,7 @@ import (
 	"github.com/easytofu/terraform-provider-ipam-github/internal/ipam"
 	"github.com/hashicorp/terraform-plugin-framework-validators/int64validator"
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
+	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
@@ -47,6 +48,7 @@ type PoolResourceModel struct {
 	BlockSize    types.Int64  `tfsdk:"block_size"`
 	CIDR         types.String `tfsdk:"cidr"`
 	Description  types.String `tfsdk:"description"`
+	Reserved     types.Bool   `tfsdk:"reserved"`
 	Metadata     types.Map    `tfsdk:"metadata"`
 }
 
@@ -67,6 +69,11 @@ with existing pools.
 - ` + "`10.0.0.0/8`" + ` - Class A (10.0.0.0 - 10.255.255.255)
 - ` + "`172.16.0.0/12`" + ` - Class B (172.16.0.0 - 172.31.255.255)
 - ` + "`192.168.0.0/16`" + ` - Class C (192.168.0.0 - 192.168.255.255)
+
+**Limitation:** Each pool managed through this provider receives a single contiguous
+CIDR block. While the underlying pools.yaml format supports multiple non-contiguous
+CIDR ranges per pool, this provider only manages single-CIDR pools. For pools with
+multiple CIDRs, manage pools.yaml directly outside of Terraform.
 
 **Example:**
 ` + "```hcl" + `
@@ -122,6 +129,11 @@ resource "github-ipam_pool" "stake" {
 				Optional:            true,
 				Description:         "Human-readable description of the pool.",
 				MarkdownDescription: "Human-readable description of the pool.",
+			},
+			"reserved": schema.BoolAttribute{
+				Optional:            true,
+				Description:         "If true, this pool is reserved and allocations are not allowed.",
+				MarkdownDescription: "If `true`, this pool is reserved and allocations are not allowed. Reserved pools hold space for future use.",
 			},
 			"metadata": schema.MapAttribute{
 				Optional:            true,
@@ -201,9 +213,10 @@ func (r *PoolResource) Create(ctx context.Context, req resource.CreateRequest, r
 		// Build metadata map
 		metadata := make(map[string]string)
 		if !plan.Metadata.IsNull() {
-			resp.Diagnostics.Append(plan.Metadata.ElementsAs(ctx, &metadata, false)...)
-			if resp.Diagnostics.HasError() {
-				return false, fmt.Errorf("failed to parse metadata")
+			diags := plan.Metadata.ElementsAs(ctx, &metadata, false)
+			resp.Diagnostics.Append(diags...)
+			if diags.HasError() {
+				return false, fmt.Errorf("failed to parse metadata: %s", poolDiagnosticsToString(diags))
 			}
 		}
 
@@ -211,6 +224,7 @@ func (r *PoolResource) Create(ctx context.Context, req resource.CreateRequest, r
 			CIDR:        []string{newCIDR},
 			Description: plan.Description.ValueString(),
 			Metadata:    metadata,
+			Reserved:    plan.Reserved.ValueBool(),
 		}
 
 		pools.AddPool(poolName, poolDef)
@@ -287,6 +301,7 @@ func (r *PoolResource) Read(ctx context.Context, req resource.ReadRequest, resp 
 	}
 
 	state.Description = types.StringValue(poolDef.Description)
+	state.Reserved = types.BoolValue(poolDef.Reserved)
 
 	if len(poolDef.Metadata) > 0 {
 		metadataValue, diags := types.MapValueFrom(ctx, types.StringType, poolDef.Metadata)
@@ -332,17 +347,19 @@ func (r *PoolResource) Update(ctx context.Context, req resource.UpdateRequest, r
 		// Build metadata map
 		metadata := make(map[string]string)
 		if !plan.Metadata.IsNull() {
-			resp.Diagnostics.Append(plan.Metadata.ElementsAs(ctx, &metadata, false)...)
-			if resp.Diagnostics.HasError() {
-				return false, fmt.Errorf("failed to parse metadata")
+			diags := plan.Metadata.ElementsAs(ctx, &metadata, false)
+			resp.Diagnostics.Append(diags...)
+			if diags.HasError() {
+				return false, fmt.Errorf("failed to parse metadata: %s", poolDiagnosticsToString(diags))
 			}
 		}
 
-		// Keep existing CIDR, only update description and metadata
+		// Keep existing CIDR, update description, reserved, and metadata
 		poolDef := ipam.PoolDefinition{
 			CIDR:        existingPool.CIDR,
 			Description: plan.Description.ValueString(),
 			Metadata:    metadata,
+			Reserved:    plan.Reserved.ValueBool(),
 		}
 
 		pools.AddPool(poolName, poolDef)
@@ -391,7 +408,7 @@ func (r *PoolResource) Delete(ctx context.Context, req resource.DeleteRequest, r
 	retryConfig := client.NewRetryConfig(r.client.MaxRetries(), r.client.BaseDelay().Milliseconds())
 
 	err := client.WithRetry(ctx, retryConfig, func(ctx context.Context, attempt int) (bool, error) {
-		pools, sha, err := r.client.GetPoolsWithSHA(ctx)
+		pools, poolsSHA, err := r.client.GetPoolsWithSHA(ctx)
 		if err != nil {
 			return false, fmt.Errorf("failed to read pools: %w", err)
 		}
@@ -404,8 +421,8 @@ func (r *PoolResource) Delete(ctx context.Context, req resource.DeleteRequest, r
 			return false, nil
 		}
 
-		// Check for existing allocations in this pool
-		db, _, err := r.client.GetAllocations(ctx)
+		// Check for existing allocations in this pool (capture SHA to detect races)
+		db, allocsSHA, err := r.client.GetAllocations(ctx)
 		if err != nil {
 			return false, fmt.Errorf("failed to read allocations: %w", err)
 		}
@@ -415,12 +432,30 @@ func (r *PoolResource) Delete(ctx context.Context, req resource.DeleteRequest, r
 			return false, fmt.Errorf("cannot delete pool %s: has %d active allocations", poolName, len(allocs))
 		}
 
+		// Re-check allocations to narrow the race window
+		// This ensures no allocations were added between our first check and now
+		dbRecheck, allocsSHARecheck, err := r.client.GetAllocations(ctx)
+		if err != nil {
+			return false, fmt.Errorf("failed to re-read allocations: %w", err)
+		}
+
+		if allocsSHARecheck != allocsSHA {
+			// Allocations file changed, re-verify no allocations exist
+			allocsRecheck := dbRecheck.GetAllocationsForPool(poolName)
+			if len(allocsRecheck) > 0 {
+				return false, fmt.Errorf("cannot delete pool %s: %d allocations were added during delete", poolName, len(allocsRecheck))
+			}
+			tflog.Debug(ctx, "Allocations file changed but no allocations for this pool", map[string]interface{}{
+				"name": poolName,
+			})
+		}
+
 		if err := pools.RemovePool(poolName); err != nil {
 			return false, err
 		}
 
 		commitMsg := fmt.Sprintf("ipam: delete pool %s", poolName)
-		err = r.client.UpdatePools(ctx, pools, sha, commitMsg)
+		err = r.client.UpdatePools(ctx, pools, poolsSHA, commitMsg)
 		if r.client.IsConflictError(err) {
 			return true, err
 		}
@@ -536,6 +571,32 @@ func uint32ToCIDR(ip uint32, prefixLen int) string {
 }
 
 // networksOverlap checks if two networks overlap.
+// Two networks overlap if: startA <= endB AND startB <= endA
 func networksOverlap(a, b *net.IPNet) bool {
-	return a.Contains(b.IP) || b.Contains(a.IP)
+	// Get start and end of network A
+	aStart := ipToUint32(a.IP)
+	aOnes, aBits := a.Mask.Size()
+	aEnd := aStart + (uint32(1) << (aBits - aOnes)) - 1
+
+	// Get start and end of network B
+	bStart := ipToUint32(b.IP)
+	bOnes, bBits := b.Mask.Size()
+	bEnd := bStart + (uint32(1) << (bBits - bOnes)) - 1
+
+	// Two ranges overlap if startA <= endB AND startB <= endA
+	return aStart <= bEnd && bStart <= aEnd
+}
+
+// poolDiagnosticsToString converts diagnostics to a string for error messages.
+func poolDiagnosticsToString(diags diag.Diagnostics) string {
+	var messages []string
+	for _, d := range diags {
+		if d.Severity() == diag.SeverityError {
+			messages = append(messages, d.Summary())
+		}
+	}
+	if len(messages) == 0 {
+		return "unknown error"
+	}
+	return fmt.Sprintf("%v", messages)
 }

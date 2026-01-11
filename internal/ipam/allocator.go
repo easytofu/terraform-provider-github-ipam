@@ -32,16 +32,23 @@ func (a *Allocator) FindNextAvailableInPool(poolDef *PoolDefinition, existingAll
 	// Get top-level allocations (those without parent_cidr)
 	topLevelAllocations := filterTopLevelAllocations(existingAllocations)
 
+	// Track reasons for skipping each CIDR
+	var skippedReasons []string
+
 	// Try each CIDR in the pool until we find available space
 	for _, poolCIDRStr := range poolDef.CIDR {
 		cidrResult, err := a.findNextInCIDR(poolCIDRStr, topLevelAllocations, prefixLen)
 		if err == nil {
 			return cidrResult, nil
 		}
-		// Continue to next pool CIDR if this one is exhausted
+		// Record why this CIDR was skipped
+		skippedReasons = append(skippedReasons, fmt.Sprintf("%s: %v", poolCIDRStr, err))
 	}
 
-	return "", fmt.Errorf("no available /%d block in pool (all %d CIDRs exhausted)", prefixLen, len(poolDef.CIDR))
+	if len(skippedReasons) == 1 {
+		return "", fmt.Errorf("no available /%d block in pool: %s", prefixLen, skippedReasons[0])
+	}
+	return "", fmt.Errorf("no available /%d block in pool (tried %d CIDRs): %v", prefixLen, len(poolDef.CIDR), skippedReasons)
 }
 
 // FindNextAvailableInParent allocates within an existing allocation's CIDR.
@@ -70,9 +77,11 @@ func (a *Allocator) findNextInCIDR(containerCIDR string, existingAllocations []A
 
 	// Parse and sort existing allocations by network address
 	sortable := make([]sortableAllocation, 0, len(relevantAllocations))
+	var skippedInvalid int
 	for i := range relevantAllocations {
 		_, network, err := net.ParseCIDR(relevantAllocations[i].CIDR)
 		if err != nil {
+			skippedInvalid++
 			continue // Skip invalid entries
 		}
 		sortable = append(sortable, sortableAllocation{
@@ -80,6 +89,9 @@ func (a *Allocator) findNextInCIDR(containerCIDR string, existingAllocations []A
 			alloc:   &relevantAllocations[i],
 		})
 	}
+	// Note: skippedInvalid count is available for debugging but not exposed in errors
+	// as invalid allocations in the database should be fixed separately
+	_ = skippedInvalid
 
 	// Sort by network address
 	sort.Slice(sortable, func(i, j int) bool {

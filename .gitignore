@@ -35,3 +35,6 @@ override.tf.json
 
 # Debug logs
 *.log
+
+# Test preview directory
+test-preview/

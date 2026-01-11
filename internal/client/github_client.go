@@ -289,7 +289,7 @@ func (c *GitHubClient) UpdateREADME(ctx context.Context, content string) error {
 	return err
 }
 
-// RegenerateREADME regenerates the README based on current pools and allocations.
+// RegenerateREADME regenerates all IPAM documentation files.
 func (c *GitHubClient) RegenerateREADME(ctx context.Context) error {
 	pools, err := c.GetPools(ctx)
 	if err != nil {
@@ -301,6 +301,46 @@ func (c *GitHubClient) RegenerateREADME(ctx context.Context) error {
 		return fmt.Errorf("failed to get allocations for README: %w", err)
 	}
 
-	readme := ipam.GenerateREADME(pools, allocations)
-	return c.UpdateREADME(ctx, readme)
+	// Generate all files
+	files := ipam.GenerateAllFiles(pools, allocations)
+
+	// Write each file
+	for path, content := range files.Files {
+		if err := c.writeFile(ctx, path, content); err != nil {
+			return fmt.Errorf("failed to write %s: %w", path, err)
+		}
+	}
+
+	return nil
+}
+
+// writeFile writes or updates a file in the repository.
+func (c *GitHubClient) writeFile(ctx context.Context, path, content string) error {
+	// Try to get existing file for SHA
+	fileContent, _, resp, err := c.client.Repositories.GetContents(
+		ctx,
+		c.owner,
+		c.repo,
+		path,
+		&github.RepositoryContentGetOptions{Ref: c.branch},
+	)
+
+	opts := &github.RepositoryContentFileOptions{
+		Message: github.String(fmt.Sprintf("docs: update %s", path)),
+		Content: []byte(content),
+		Branch:  github.String(c.branch),
+	}
+
+	if err == nil && fileContent != nil {
+		// File exists, update it
+		opts.SHA = github.String(*fileContent.SHA)
+		_, _, err = c.client.Repositories.UpdateFile(ctx, c.owner, c.repo, path, opts)
+	} else if resp != nil && resp.StatusCode == 404 {
+		// File doesn't exist, create it
+		_, _, err = c.client.Repositories.CreateFile(ctx, c.owner, c.repo, path, opts)
+	} else if err != nil {
+		return fmt.Errorf("failed to check file existence: %w", err)
+	}
+
+	return err
 }

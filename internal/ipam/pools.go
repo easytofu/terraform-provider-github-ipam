@@ -23,9 +23,10 @@ func NewPoolsConfig() *PoolsConfig {
 
 // PoolDefinition defines a pool in pools.yaml.
 type PoolDefinition struct {
-	CIDR        []string          `yaml:"cidr"`        // Array of CIDRs for this pool
-	Description string            `yaml:"description"` // Human-readable description
-	Metadata    map[string]string `yaml:"metadata"`    // Arbitrary key-value metadata
+	CIDR        []string          `yaml:"cidr"`                  // Array of CIDRs for this pool
+	Description string            `yaml:"description"`           // Human-readable description
+	Metadata    map[string]string `yaml:"metadata"`              // Arbitrary key-value metadata
+	Reserved    bool              `yaml:"reserved,omitempty"`    // If true, pool is reserved (no allocations allowed)
 }
 
 // GetPool looks up a pool by pool_id.
@@ -105,6 +106,27 @@ func (p *PoolsConfig) ValidatePools() error {
 }
 
 // networksOverlap checks if two networks overlap.
+// Two networks overlap if: startA <= endB AND startB <= endA
 func networksOverlap(a, b *net.IPNet) bool {
-	return a.Contains(b.IP) || b.Contains(a.IP)
+	// Get start and end of network A
+	aStart := ipToUint32(a.IP)
+	aOnes, aBits := a.Mask.Size()
+	aEnd := aStart + (uint32(1) << (aBits - aOnes)) - 1
+
+	// Get start and end of network B
+	bStart := ipToUint32(b.IP)
+	bOnes, bBits := b.Mask.Size()
+	bEnd := bStart + (uint32(1) << (bBits - bOnes)) - 1
+
+	// Two ranges overlap if startA <= endB AND startB <= endA
+	return aStart <= bEnd && bStart <= aEnd
+}
+
+// ipToUint32 converts a net.IP to uint32 for calculations.
+func ipToUint32(ip net.IP) uint32 {
+	ip = ip.To4()
+	if ip == nil {
+		return 0
+	}
+	return uint32(ip[0])<<24 | uint32(ip[1])<<16 | uint32(ip[2])<<8 | uint32(ip[3])
 }

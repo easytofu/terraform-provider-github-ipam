@@ -6,11 +6,13 @@ package resources
 import (
 	"context"
 	"fmt"
+	"net"
 
 	"github.com/easytofu/terraform-provider-ipam-github/internal/client"
 	"github.com/easytofu/terraform-provider-ipam-github/internal/ipam"
 	"github.com/google/uuid"
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
+	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
@@ -42,13 +44,15 @@ type AllocationResource struct {
 
 // AllocationResourceModel describes the resource data model.
 type AllocationResourceModel struct {
-	ID         types.String `tfsdk:"id"`
-	PoolID     types.String `tfsdk:"pool_id"`
-	ParentCIDR types.String `tfsdk:"parent_cidr"`
-	CIDRMask   types.Int64  `tfsdk:"cidr_mask"`
-	CIDR       types.String `tfsdk:"cidr"`
-	Name       types.String `tfsdk:"name"`
-	Metadata   types.Map    `tfsdk:"metadata"`
+	ID             types.String `tfsdk:"id"`
+	PoolID         types.String `tfsdk:"pool_id"`
+	ParentCIDR     types.String `tfsdk:"parent_cidr"`
+	CIDRMask       types.Int64  `tfsdk:"cidr_mask"`
+	CIDR           types.String `tfsdk:"cidr"`
+	Name           types.String `tfsdk:"name"`
+	Status         types.String `tfsdk:"status"`
+	ContiguousWith types.String `tfsdk:"contiguous_with"`
+	Metadata       types.Map    `tfsdk:"metadata"`
 }
 
 func (r *AllocationResource) Metadata(ctx context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
@@ -121,6 +125,25 @@ Exactly one of ` + "`pool_id`" + ` or ` + "`parent_cidr`" + ` must be specified.
 					stringplanmodifier.RequiresReplace(),
 				},
 			},
+			"status": schema.StringAttribute{
+				Optional:            true,
+				Computed:            true,
+				Description:         "Status of the allocation: 'allocation' (default) or 'reservation'. Reservations cannot be used for sub-allocations.",
+				MarkdownDescription: "Status of the allocation: `allocation` (default) or `reservation`. Reservations hold space for future use.",
+				Validators: []validator.String{
+					stringvalidator.OneOf("allocation", "reservation"),
+				},
+			},
+			"contiguous_with": schema.StringAttribute{
+				Optional: true,
+				Description: "CIDR of an existing allocation that this block must be immediately adjacent to. " +
+					"If the constraint cannot be satisfied, the plan will fail.",
+				MarkdownDescription: "CIDR of an existing allocation that this block must be immediately adjacent to. " +
+					"If the constraint cannot be satisfied, the plan will fail.",
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.RequiresReplace(),
+				},
+			},
 			"metadata": schema.MapAttribute{
 				Optional:            true,
 				ElementType:         types.StringType,
@@ -158,8 +181,16 @@ func (r *AllocationResource) Create(ctx context.Context, req resource.CreateRequ
 		return
 	}
 
-	// Generate stable UUID for this allocation
-	allocationID := uuid.New().String()
+	// Generate deterministic UUID for this allocation based on stable configuration
+	// This ensures idempotency across Terraform retries
+	var idInput string
+	if !plan.PoolID.IsNull() {
+		idInput = fmt.Sprintf("pool:%s:name:%s:mask:%d", plan.PoolID.ValueString(), plan.Name.ValueString(), plan.CIDRMask.ValueInt64())
+	} else {
+		idInput = fmt.Sprintf("parent:%s:name:%s:mask:%d", plan.ParentCIDR.ValueString(), plan.Name.ValueString(), plan.CIDRMask.ValueInt64())
+	}
+	// Use UUID v5 with DNS namespace for deterministic generation
+	allocationID := uuid.NewSHA1(uuid.NameSpaceDNS, []byte(idInput)).String()
 
 	tflog.Debug(ctx, "Creating allocation", map[string]interface{}{
 		"allocation_id": allocationID,
@@ -204,10 +235,25 @@ func (r *AllocationResource) Create(ctx context.Context, req resource.CreateRequ
 				return false, fmt.Errorf("pool_id %q not found in pools.yaml", poolID)
 			}
 
+			// Check if pool is reserved - cannot allocate from reserved pools
+			if poolDef.Reserved {
+				return false, fmt.Errorf("cannot allocate from pool %q: pool is reserved (reserved pools cannot have allocations)", poolID)
+			}
+
 			existingAllocs := db.GetAllocationsForPool(poolID)
-			newCIDR, err = r.allocator.FindNextAvailableInPool(poolDef, existingAllocs, int(plan.CIDRMask.ValueInt64()))
-			if err != nil {
-				return false, fmt.Errorf("allocation from pool %s failed: %w", poolID, err)
+
+			// Check if contiguous_with is specified
+			if !plan.ContiguousWith.IsNull() {
+				targetCIDR := plan.ContiguousWith.ValueString()
+				newCIDR, err = findContiguousCIDR(poolDef, existingAllocs, int(plan.CIDRMask.ValueInt64()), targetCIDR)
+				if err != nil {
+					return false, fmt.Errorf("contiguous allocation failed: %w", err)
+				}
+			} else {
+				newCIDR, err = r.allocator.FindNextAvailableInPool(poolDef, existingAllocs, int(plan.CIDRMask.ValueInt64()))
+				if err != nil {
+					return false, fmt.Errorf("allocation from pool %s failed: %w", poolID, err)
+				}
 			}
 
 			tflog.Debug(ctx, "Allocated from pool", map[string]interface{}{
@@ -224,7 +270,11 @@ func (r *AllocationResource) Create(ctx context.Context, req resource.CreateRequ
 				return false, fmt.Errorf("parent_cidr %q not found in allocations", parentCIDR)
 			}
 			poolID = parentPoolID
-			_ = parentAlloc // Can use for validation if needed
+
+			// Check if parent is reserved - cannot sub-allocate from reserved blocks
+			if parentAlloc.Reserved {
+				return false, fmt.Errorf("cannot sub-allocate from %q: parent is a reservation (reserved blocks cannot have children)", parentCIDR)
+			}
 
 			childAllocs := db.GetAllocationsForParent(parentCIDR)
 			newCIDR, err = r.allocator.FindNextAvailableInParent(parentCIDR, childAllocs, int(plan.CIDRMask.ValueInt64()))
@@ -241,9 +291,10 @@ func (r *AllocationResource) Create(ctx context.Context, req resource.CreateRequ
 		// Build metadata map
 		metadata := make(map[string]string)
 		if !plan.Metadata.IsNull() {
-			resp.Diagnostics.Append(plan.Metadata.ElementsAs(ctx, &metadata, false)...)
-			if resp.Diagnostics.HasError() {
-				return false, fmt.Errorf("failed to parse metadata")
+			diags := plan.Metadata.ElementsAs(ctx, &metadata, false)
+			resp.Diagnostics.Append(diags...)
+			if diags.HasError() {
+				return false, fmt.Errorf("failed to parse metadata: %s", diagnosticsToString(diags))
 			}
 		}
 
@@ -254,17 +305,39 @@ func (r *AllocationResource) Create(ctx context.Context, req resource.CreateRequ
 			parentCIDRPtr = &pc
 		}
 
-		allocation := ipam.Allocation{
-			CIDR:       newCIDR,
-			ID:         allocationID,
-			Name:       plan.Name.ValueString(),
-			ParentCIDR: parentCIDRPtr,
-			Metadata:   metadata,
+		// Determine status (default to "allocation")
+		status := "allocation"
+		isReserved := false
+		if !plan.Status.IsNull() && plan.Status.ValueString() == "reservation" {
+			status = "reservation"
+			isReserved = true
 		}
+
+		// Build contiguous_with pointer
+		var contiguousWithPtr *string
+		if !plan.ContiguousWith.IsNull() {
+			cw := plan.ContiguousWith.ValueString()
+			contiguousWithPtr = &cw
+		}
+
+		allocation := ipam.Allocation{
+			CIDR:           newCIDR,
+			ID:             allocationID,
+			Name:           plan.Name.ValueString(),
+			ParentCIDR:     parentCIDRPtr,
+			Metadata:       metadata,
+			Reserved:       isReserved,
+			ContiguousWith: contiguousWithPtr,
+		}
+		_ = status // Used for logging
 
 		db.AddAllocation(poolID, allocation)
 
-		commitMsg := fmt.Sprintf("ipam: allocate %s (%s)", newCIDR, plan.Name.ValueString())
+		action := "allocate"
+		if isReserved {
+			action = "reserve"
+		}
+		commitMsg := fmt.Sprintf("ipam: %s %s (%s)", action, newCIDR, plan.Name.ValueString())
 		err = r.client.UpdateAllocations(ctx, db, sha, commitMsg)
 		if r.client.IsConflictError(err) {
 			tflog.Debug(ctx, "Conflict detected, will retry", map[string]interface{}{
@@ -286,11 +359,15 @@ func (r *AllocationResource) Create(ctx context.Context, req resource.CreateRequ
 
 	plan.ID = types.StringValue(allocationID)
 	plan.CIDR = types.StringValue(allocatedCIDR)
+	if plan.Status.IsNull() {
+		plan.Status = types.StringValue("allocation")
+	}
 
 	tflog.Info(ctx, "Created allocation", map[string]interface{}{
-		"id":   allocationID,
-		"cidr": allocatedCIDR,
-		"name": plan.Name.ValueString(),
+		"id":     allocationID,
+		"cidr":   allocatedCIDR,
+		"name":   plan.Name.ValueString(),
+		"status": plan.Status.ValueString(),
 	})
 
 	// Regenerate README (best effort, don't fail on error)
@@ -333,6 +410,18 @@ func (r *AllocationResource) Read(ctx context.Context, req resource.ReadRequest,
 	// Update state with current values from the database
 	state.CIDR = types.StringValue(alloc.CIDR)
 	state.Name = types.StringValue(alloc.Name)
+
+	// Set status based on Reserved flag
+	if alloc.Reserved {
+		state.Status = types.StringValue("reservation")
+	} else {
+		state.Status = types.StringValue("allocation")
+	}
+
+	// Set contiguous_with if present
+	if alloc.ContiguousWith != nil {
+		state.ContiguousWith = types.StringValue(*alloc.ContiguousWith)
+	}
 
 	if alloc.ParentCIDR != nil {
 		state.ParentCIDR = types.StringValue(*alloc.ParentCIDR)
@@ -383,12 +472,18 @@ func (r *AllocationResource) Update(ctx context.Context, req resource.UpdateRequ
 		// Update metadata
 		metadata := make(map[string]string)
 		if !plan.Metadata.IsNull() {
-			resp.Diagnostics.Append(plan.Metadata.ElementsAs(ctx, &metadata, false)...)
-			if resp.Diagnostics.HasError() {
-				return false, fmt.Errorf("failed to parse metadata")
+			diags := plan.Metadata.ElementsAs(ctx, &metadata, false)
+			resp.Diagnostics.Append(diags...)
+			if diags.HasError() {
+				return false, fmt.Errorf("failed to parse metadata: %s", diagnosticsToString(diags))
 			}
 		}
 		alloc.Metadata = metadata
+
+		// Update status (allows converting between allocation and reservation)
+		if !plan.Status.IsNull() {
+			alloc.Reserved = plan.Status.ValueString() == "reservation"
+		}
 
 		// Remove old and add updated allocation
 		if err := db.RemoveAllocation(poolID, alloc.ID); err != nil {
@@ -396,7 +491,11 @@ func (r *AllocationResource) Update(ctx context.Context, req resource.UpdateRequ
 		}
 		db.AddAllocation(poolID, *alloc)
 
-		commitMsg := fmt.Sprintf("ipam: update %s (%s)", alloc.CIDR, alloc.Name)
+		action := "update"
+		if alloc.Reserved {
+			action = "update reservation"
+		}
+		commitMsg := fmt.Sprintf("ipam: %s %s (%s)", action, alloc.CIDR, alloc.Name)
 		err = r.client.UpdateAllocations(ctx, db, sha, commitMsg)
 		if r.client.IsConflictError(err) {
 			return true, err
@@ -487,10 +586,207 @@ func (r *AllocationResource) Delete(ctx context.Context, req resource.DeleteRequ
 }
 
 func (r *AllocationResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
-	// Import by allocation ID
 	tflog.Debug(ctx, "Importing allocation", map[string]interface{}{
 		"id": req.ID,
 	})
 
-	resource.ImportStatePassthroughID(ctx, path.Root("id"), req, resp)
+	// Read the allocation to get all necessary fields
+	db, _, err := r.client.GetAllocations(ctx)
+	if err != nil {
+		resp.Diagnostics.AddError("Failed to read allocations", err.Error())
+		return
+	}
+
+	alloc, poolID, found := db.FindAllocationByID(req.ID)
+	if !found {
+		resp.Diagnostics.AddError("Allocation not found", fmt.Sprintf("No allocation with ID %q exists", req.ID))
+		return
+	}
+
+	// Parse CIDR to extract mask
+	_, network, err := net.ParseCIDR(alloc.CIDR)
+	if err != nil {
+		resp.Diagnostics.AddError("Invalid CIDR in allocation", fmt.Sprintf("CIDR %q is invalid: %s", alloc.CIDR, err))
+		return
+	}
+	maskSize, _ := network.Mask.Size()
+
+	// Set all state attributes
+	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("id"), req.ID)...)
+	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("cidr"), alloc.CIDR)...)
+	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("cidr_mask"), int64(maskSize))...)
+	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("name"), alloc.Name)...)
+
+	// Set status
+	status := "allocation"
+	if alloc.Reserved {
+		status = "reservation"
+	}
+	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("status"), status)...)
+
+	// Set pool_id or parent_cidr based on allocation type
+	if alloc.ParentCIDR != nil {
+		resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("parent_cidr"), *alloc.ParentCIDR)...)
+	} else {
+		resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("pool_id"), poolID)...)
+	}
+
+	// Set contiguous_with if present
+	if alloc.ContiguousWith != nil {
+		resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("contiguous_with"), *alloc.ContiguousWith)...)
+	}
+
+	// Set metadata if present
+	if len(alloc.Metadata) > 0 {
+		metadataValue, diags := types.MapValueFrom(ctx, types.StringType, alloc.Metadata)
+		resp.Diagnostics.Append(diags...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+		resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("metadata"), metadataValue)...)
+	}
+
+	tflog.Info(ctx, "Imported allocation", map[string]interface{}{
+		"id":        req.ID,
+		"cidr":      alloc.CIDR,
+		"cidr_mask": maskSize,
+	})
+}
+
+// findContiguousCIDR finds a CIDR block that is immediately adjacent to the target CIDR.
+func findContiguousCIDR(pool *ipam.PoolDefinition, allocs []ipam.Allocation, prefixLen int, targetCIDR string) (string, error) {
+	_, targetNet, err := net.ParseCIDR(targetCIDR)
+	if err != nil {
+		return "", fmt.Errorf("invalid target CIDR %q: %w", targetCIDR, err)
+	}
+
+	// Calculate target range
+	targetStart := ipToUint32(targetNet.IP)
+	targetOnes, targetBits := targetNet.Mask.Size()
+	targetSize := uint32(1) << (targetBits - targetOnes)
+	targetEnd := targetStart + targetSize
+
+	// Desired block size
+	blockSize := uint32(1) << (32 - prefixLen)
+
+	var beforeReason, afterReason string
+
+	// Check space immediately before target
+	if targetStart >= blockSize {
+		beforeStart := targetStart - blockSize
+		if beforeStart%blockSize == 0 {
+			beforeCIDR := fmt.Sprintf("%s/%d", uint32ToIP(beforeStart), prefixLen)
+			if !isInPool(pool, beforeCIDR) {
+				beforeReason = fmt.Sprintf("before block %s is outside pool boundaries", beforeCIDR)
+			} else if overlapsAny(beforeCIDR, allocs) {
+				beforeReason = fmt.Sprintf("before block %s overlaps with existing allocation", beforeCIDR)
+			} else {
+				return beforeCIDR, nil
+			}
+		} else {
+			beforeReason = fmt.Sprintf("no valid /%d boundary before target (alignment requires address divisible by %d)", prefixLen, blockSize)
+		}
+	} else {
+		beforeReason = "target is too close to start of address space for a block before it"
+	}
+
+	// Check space immediately after target
+	afterStart := targetEnd
+	if afterStart%blockSize == 0 {
+		afterCIDR := fmt.Sprintf("%s/%d", uint32ToIP(afterStart), prefixLen)
+		if !isInPool(pool, afterCIDR) {
+			afterReason = fmt.Sprintf("after block %s is outside pool boundaries", afterCIDR)
+		} else if overlapsAny(afterCIDR, allocs) {
+			afterReason = fmt.Sprintf("after block %s overlaps with existing allocation", afterCIDR)
+		} else {
+			return afterCIDR, nil
+		}
+	} else {
+		afterReason = fmt.Sprintf("no valid /%d boundary after target (target end %s not aligned to block size %d)",
+			prefixLen, uint32ToIP(afterStart), blockSize)
+	}
+
+	return "", fmt.Errorf("no contiguous /%d space available adjacent to %s: before: %s; after: %s",
+		prefixLen, targetCIDR, beforeReason, afterReason)
+}
+
+func isInPool(pool *ipam.PoolDefinition, cidr string) bool {
+	_, candidateNet, err := net.ParseCIDR(cidr)
+	if err != nil {
+		return false
+	}
+
+	for _, poolCIDR := range pool.CIDR {
+		_, poolNet, err := net.ParseCIDR(poolCIDR)
+		if err != nil {
+			continue
+		}
+		// Check if candidate is fully contained in pool
+		candidateStart := ipToUint32(candidateNet.IP)
+		candidateOnes, candidateBits := candidateNet.Mask.Size()
+		candidateEnd := candidateStart + uint32(1)<<(candidateBits-candidateOnes) - 1
+
+		poolStart := ipToUint32(poolNet.IP)
+		poolOnes, poolBits := poolNet.Mask.Size()
+		poolEnd := poolStart + uint32(1)<<(poolBits-poolOnes) - 1
+
+		if candidateStart >= poolStart && candidateEnd <= poolEnd {
+			return true
+		}
+	}
+	return false
+}
+
+func uint32ToIP(n uint32) string {
+	return fmt.Sprintf("%d.%d.%d.%d",
+		(n>>24)&0xFF,
+		(n>>16)&0xFF,
+		(n>>8)&0xFF,
+		n&0xFF)
+}
+
+func overlapsAny(cidr string, allocs []ipam.Allocation) bool {
+	_, candidateNet, err := net.ParseCIDR(cidr)
+	if err != nil {
+		return true // Treat errors as overlap to be safe
+	}
+
+	candidateStart := ipToUint32(candidateNet.IP)
+	candidateOnes, candidateBits := candidateNet.Mask.Size()
+	candidateEnd := candidateStart + uint32(1)<<(candidateBits-candidateOnes)
+
+	for _, alloc := range allocs {
+		if alloc.ParentCIDR != nil {
+			continue // Skip sub-allocations
+		}
+
+		_, allocNet, err := net.ParseCIDR(alloc.CIDR)
+		if err != nil {
+			continue
+		}
+
+		allocStart := ipToUint32(allocNet.IP)
+		allocOnes, allocBits := allocNet.Mask.Size()
+		allocEnd := allocStart + uint32(1)<<(allocBits-allocOnes)
+
+		// Check for overlap
+		if candidateStart < allocEnd && candidateEnd > allocStart {
+			return true
+		}
+	}
+	return false
+}
+
+// diagnosticsToString converts diagnostics to a string for error messages.
+func diagnosticsToString(diags diag.Diagnostics) string {
+	var messages []string
+	for _, d := range diags {
+		if d.Severity() == diag.SeverityError {
+			messages = append(messages, d.Summary())
+		}
+	}
+	if len(messages) == 0 {
+		return "unknown error"
+	}
+	return fmt.Sprintf("%v", messages)
 }

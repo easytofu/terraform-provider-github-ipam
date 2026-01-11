@@ -17,12 +17,14 @@ type AllocationsDatabase struct {
 
 // Allocation represents a single CIDR allocation.
 type Allocation struct {
-	CIDR       string            `json:"cidr"`
-	ID         string            `json:"id"`                    // UUID linking to Terraform state
-	Name       string            `json:"name,omitempty"`        // Human-readable name
-	ParentCIDR *string           `json:"parent_cidr,omitempty"` // For sub-allocations
-	Metadata   map[string]string `json:"metadata,omitempty"`    // Arbitrary key-value metadata
-	CreatedAt  string            `json:"created_at,omitempty"`  // RFC3339 timestamp
+	CIDR          string            `json:"cidr"`
+	ID            string            `json:"id"`                       // UUID linking to Terraform state
+	Name          string            `json:"name,omitempty"`           // Human-readable name
+	ParentCIDR    *string           `json:"parent_cidr,omitempty"`    // For sub-allocations
+	Metadata      map[string]string `json:"metadata,omitempty"`       // Arbitrary key-value metadata
+	CreatedAt     string            `json:"created_at,omitempty"`     // RFC3339 timestamp
+	Reserved      bool              `json:"reserved,omitempty"`       // True if this is a reservation (cannot be allocated)
+	ContiguousWith *string          `json:"contiguous_with,omitempty"` // CIDR this reservation must be adjacent to
 }
 
 // NewAllocationsDatabase creates a new empty allocations database.
