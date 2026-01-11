@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -58,9 +59,13 @@ func (c *GitHubClient) GetPools(ctx context.Context) (*ipam.PoolsConfig, error) 
 	)
 	if err != nil {
 		if resp != nil && resp.StatusCode == 404 {
-			// File doesn't exist, create it with empty pools
+			// File doesn't exist, try to create it with empty pools
 			emptyPools := ipam.NewPoolsConfig()
 			if createErr := c.createPoolsFile(ctx, emptyPools); createErr != nil {
+				// If we get a 409 conflict, another process created the file - retry read
+				if c.IsConflictError(createErr) {
+					return c.GetPools(ctx)
+				}
 				return nil, fmt.Errorf("pools file not found and failed to create: %w", createErr)
 			}
 			return emptyPools, nil
@@ -104,11 +109,8 @@ func (c *GitHubClient) createPoolsFile(ctx context.Context, pools *ipam.PoolsCon
 	}
 
 	_, _, err = c.client.Repositories.CreateFile(ctx, c.owner, c.repo, c.poolsFile, opts)
-	if err != nil {
-		return fmt.Errorf("failed to create pools file: %w", err)
-	}
-
-	return nil
+	// Return raw error to preserve type for IsConflictError detection
+	return err
 }
 
 // GetPoolsWithSHA reads pools.yaml and returns the SHA for OCC updates.
@@ -123,9 +125,13 @@ func (c *GitHubClient) GetPoolsWithSHA(ctx context.Context) (*ipam.PoolsConfig, 
 	)
 	if err != nil {
 		if resp != nil && resp.StatusCode == 404 {
-			// File doesn't exist, create it with empty pools
+			// File doesn't exist, try to create it with empty pools
 			emptyPools := ipam.NewPoolsConfig()
 			if createErr := c.createPoolsFile(ctx, emptyPools); createErr != nil {
+				// If we get a 409 conflict, another process created the file - retry read
+				if c.IsConflictError(createErr) {
+					return c.GetPoolsWithSHA(ctx)
+				}
 				return nil, "", fmt.Errorf("pools file not found and failed to create: %w", createErr)
 			}
 			// Fetch again to get the SHA
@@ -204,6 +210,7 @@ func (c *GitHubClient) GetAllocations(ctx context.Context) (*ipam.AllocationsDat
 }
 
 // UpdateAllocations writes allocations.json with OCC via SHA.
+// If SHA is empty (file doesn't exist), creates the file.
 func (c *GitHubClient) UpdateAllocations(ctx context.Context, db *ipam.AllocationsDatabase, sha, commitMessage string) error {
 	content, err := json.MarshalIndent(db, "", "  ")
 	if err != nil {
@@ -217,10 +224,13 @@ func (c *GitHubClient) UpdateAllocations(ctx context.Context, db *ipam.Allocatio
 	}
 
 	if sha != "" {
+		// Update existing file with OCC
 		opts.SHA = github.String(sha)
+		_, _, err = c.client.Repositories.UpdateFile(ctx, c.owner, c.repo, c.allocationsFile, opts)
+	} else {
+		// Create new file
+		_, _, err = c.client.Repositories.CreateFile(ctx, c.owner, c.repo, c.allocationsFile, opts)
 	}
-
-	_, _, err = c.client.Repositories.UpdateFile(ctx, c.owner, c.repo, c.allocationsFile, opts)
 	return err
 }
 
@@ -229,8 +239,9 @@ func (c *GitHubClient) IsConflictError(err error) bool {
 	if err == nil {
 		return false
 	}
-	if ghErr, ok := err.(*github.ErrorResponse); ok {
-		return ghErr.Response.StatusCode == 409
+	var ghErr *github.ErrorResponse
+	if errors.As(err, &ghErr) {
+		return ghErr.Response != nil && ghErr.Response.StatusCode == 409
 	}
 	return false
 }
