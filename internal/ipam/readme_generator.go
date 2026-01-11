@@ -56,8 +56,8 @@ func GenerateREADME(pools *PoolsConfig, allocations *AllocationsDatabase) string
 
 		// Calculate statistics
 		stats := calculateRangeStats(pr, poolsInRange, allocations)
-		sb.WriteString(fmt.Sprintf("| Metric | Value |\n"))
-		sb.WriteString(fmt.Sprintf("|--------|-------|\n"))
+		sb.WriteString("| Metric | Value |\n")
+		sb.WriteString("|--------|-------|\n")
 		sb.WriteString(fmt.Sprintf("| Total Addresses | %s |\n", formatNumber(pr.TotalAddrs)))
 		sb.WriteString(fmt.Sprintf("| Allocated to Pools | %s |\n", formatNumber(stats.PoolAddrs)))
 		sb.WriteString(fmt.Sprintf("| Used by Allocations | %s |\n", formatNumber(stats.AllocAddrs)))
