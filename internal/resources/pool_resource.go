@@ -23,13 +23,6 @@ import (
 	"github.com/hashicorp/terraform-plugin-log/tflog"
 )
 
-// Private IP ranges (RFC 1918)
-var validPrivateRanges = []string{
-	"10.0.0.0/8",      // Class A: 10.0.0.0 - 10.255.255.255
-	"172.16.0.0/12",   // Class B: 172.16.0.0 - 172.31.255.255
-	"192.168.0.0/16",  // Class C: 192.168.0.0 - 192.168.255.255
-}
-
 // Ensure provider defined types fully satisfy framework interfaces.
 var (
 	_ resource.Resource                = &PoolResource{}

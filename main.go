@@ -12,10 +12,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/providerserver"
 )
 
-var (
-	version = "dev"
-	commit  = "none"
-)
+var version = "dev"
 
 func main() {
 	var debug bool
