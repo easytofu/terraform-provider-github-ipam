@@ -255,3 +255,52 @@ func (c *GitHubClient) MaxRetries() int {
 func (c *GitHubClient) BaseDelay() time.Duration {
 	return c.baseDelay
 }
+
+// UpdateREADME updates the .github/README.md file with current IPAM status.
+func (c *GitHubClient) UpdateREADME(ctx context.Context, content string) error {
+	readmePath := ".github/README.md"
+
+	// Try to get existing file for SHA
+	fileContent, _, resp, err := c.client.Repositories.GetContents(
+		ctx,
+		c.owner,
+		c.repo,
+		readmePath,
+		&github.RepositoryContentGetOptions{Ref: c.branch},
+	)
+
+	opts := &github.RepositoryContentFileOptions{
+		Message: github.String("docs: update IPAM status"),
+		Content: []byte(content),
+		Branch:  github.String(c.branch),
+	}
+
+	if err == nil && fileContent != nil {
+		// File exists, update it
+		opts.SHA = github.String(*fileContent.SHA)
+		_, _, err = c.client.Repositories.UpdateFile(ctx, c.owner, c.repo, readmePath, opts)
+	} else if resp != nil && resp.StatusCode == 404 {
+		// File doesn't exist, create it
+		_, _, err = c.client.Repositories.CreateFile(ctx, c.owner, c.repo, readmePath, opts)
+	} else {
+		return fmt.Errorf("failed to check README existence: %w", err)
+	}
+
+	return err
+}
+
+// RegenerateREADME regenerates the README based on current pools and allocations.
+func (c *GitHubClient) RegenerateREADME(ctx context.Context) error {
+	pools, err := c.GetPools(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to get pools for README: %w", err)
+	}
+
+	allocations, _, err := c.GetAllocations(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to get allocations for README: %w", err)
+	}
+
+	readme := ipam.GenerateREADME(pools, allocations)
+	return c.UpdateREADME(ctx, readme)
+}

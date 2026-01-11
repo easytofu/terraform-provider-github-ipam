@@ -293,6 +293,13 @@ func (r *AllocationResource) Create(ctx context.Context, req resource.CreateRequ
 		"name": plan.Name.ValueString(),
 	})
 
+	// Regenerate README (best effort, don't fail on error)
+	if err := r.client.RegenerateREADME(ctx); err != nil {
+		tflog.Warn(ctx, "Failed to regenerate README", map[string]interface{}{
+			"error": err.Error(),
+		})
+	}
+
 	resp.Diagnostics.Append(resp.State.Set(ctx, plan)...)
 }
 
@@ -402,6 +409,13 @@ func (r *AllocationResource) Update(ctx context.Context, req resource.UpdateRequ
 		return
 	}
 
+	// Regenerate README (best effort, don't fail on error)
+	if err := r.client.RegenerateREADME(ctx); err != nil {
+		tflog.Warn(ctx, "Failed to regenerate README", map[string]interface{}{
+			"error": err.Error(),
+		})
+	}
+
 	resp.Diagnostics.Append(resp.State.Set(ctx, plan)...)
 }
 
@@ -463,6 +477,13 @@ func (r *AllocationResource) Delete(ctx context.Context, req resource.DeleteRequ
 		"id":   state.ID.ValueString(),
 		"cidr": state.CIDR.ValueString(),
 	})
+
+	// Regenerate README (best effort, don't fail on error)
+	if err := r.client.RegenerateREADME(ctx); err != nil {
+		tflog.Warn(ctx, "Failed to regenerate README", map[string]interface{}{
+			"error": err.Error(),
+		})
+	}
 }
 
 func (r *AllocationResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {

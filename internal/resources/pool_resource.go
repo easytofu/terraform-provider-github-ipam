@@ -242,6 +242,13 @@ func (r *PoolResource) Create(ctx context.Context, req resource.CreateRequest, r
 		"cidr": allocatedCIDR,
 	})
 
+	// Regenerate README (best effort, don't fail on error)
+	if err := r.client.RegenerateREADME(ctx); err != nil {
+		tflog.Warn(ctx, "Failed to regenerate README", map[string]interface{}{
+			"error": err.Error(),
+		})
+	}
+
 	resp.Diagnostics.Append(resp.State.Set(ctx, plan)...)
 }
 
@@ -357,6 +364,13 @@ func (r *PoolResource) Update(ctx context.Context, req resource.UpdateRequest, r
 		"name": poolName,
 	})
 
+	// Regenerate README (best effort, don't fail on error)
+	if err := r.client.RegenerateREADME(ctx); err != nil {
+		tflog.Warn(ctx, "Failed to regenerate README", map[string]interface{}{
+			"error": err.Error(),
+		})
+	}
+
 	resp.Diagnostics.Append(resp.State.Set(ctx, plan)...)
 }
 
@@ -421,6 +435,13 @@ func (r *PoolResource) Delete(ctx context.Context, req resource.DeleteRequest, r
 	tflog.Info(ctx, "Deleted pool", map[string]interface{}{
 		"name": poolName,
 	})
+
+	// Regenerate README (best effort, don't fail on error)
+	if err := r.client.RegenerateREADME(ctx); err != nil {
+		tflog.Warn(ctx, "Failed to regenerate README", map[string]interface{}{
+			"error": err.Error(),
+		})
+	}
 }
 
 func (r *PoolResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {

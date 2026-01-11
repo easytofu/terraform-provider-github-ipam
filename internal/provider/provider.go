@@ -177,6 +177,7 @@ func (p *GitIPAMProvider) DataSources(ctx context.Context) []func() datasource.D
 	return []func() datasource.DataSource{
 		datasources.NewPoolsDataSource,
 		datasources.NewPoolDataSource,
+		datasources.NewAllocationDataSource,
 		datasources.NewAllocationsDataSource,
 		datasources.NewNextAvailableDataSource,
 	}

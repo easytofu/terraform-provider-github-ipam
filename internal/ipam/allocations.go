@@ -57,6 +57,18 @@ func (d *AllocationsDatabase) FindAllocationByCIDR(cidr string) (*Allocation, st
 	return nil, "", false
 }
 
+// FindAllocationByName searches all pools for an allocation by name.
+func (d *AllocationsDatabase) FindAllocationByName(name string) (*Allocation, string, bool) {
+	for poolID, allocations := range d.Allocations {
+		for i := range allocations {
+			if allocations[i].Name == name {
+				return &allocations[i], poolID, true
+			}
+		}
+	}
+	return nil, "", false
+}
+
 // GetAllocationsForPool returns all allocations for a pool.
 func (d *AllocationsDatabase) GetAllocationsForPool(poolID string) []Allocation {
 	if d.Allocations == nil {
