@@ -14,6 +14,13 @@ type PoolsConfig struct {
 	Pools map[string]PoolDefinition `yaml:"pools"`
 }
 
+// NewPoolsConfig creates a new empty pools configuration.
+func NewPoolsConfig() *PoolsConfig {
+	return &PoolsConfig{
+		Pools: make(map[string]PoolDefinition),
+	}
+}
+
 // PoolDefinition defines a pool in pools.yaml.
 type PoolDefinition struct {
 	CIDR        []string          `yaml:"cidr"`        // Array of CIDRs for this pool

@@ -47,7 +47,7 @@ func NewGitHubClient(token, owner, repo, branch, poolsFile, allocationsFile stri
 	}
 }
 
-// GetPools reads pools.yaml (read-only, no SHA needed for OCC).
+// GetPools reads pools.yaml. If the file doesn't exist, it creates an empty one.
 func (c *GitHubClient) GetPools(ctx context.Context) (*ipam.PoolsConfig, error) {
 	fileContent, _, resp, err := c.client.Repositories.GetContents(
 		ctx,
@@ -58,7 +58,12 @@ func (c *GitHubClient) GetPools(ctx context.Context) (*ipam.PoolsConfig, error) 
 	)
 	if err != nil {
 		if resp != nil && resp.StatusCode == 404 {
-			return nil, fmt.Errorf("pools file not found: %s", c.poolsFile)
+			// File doesn't exist, create it with empty pools
+			emptyPools := ipam.NewPoolsConfig()
+			if createErr := c.createPoolsFile(ctx, emptyPools); createErr != nil {
+				return nil, fmt.Errorf("pools file not found and failed to create: %w", createErr)
+			}
+			return emptyPools, nil
 		}
 		return nil, fmt.Errorf("failed to get pools file: %w", err)
 	}
@@ -73,7 +78,37 @@ func (c *GitHubClient) GetPools(ctx context.Context) (*ipam.PoolsConfig, error) 
 		return nil, fmt.Errorf("failed to parse pools YAML: %w", err)
 	}
 
+	// Ensure Pools map is initialized
+	if pools.Pools == nil {
+		pools.Pools = make(map[string]ipam.PoolDefinition)
+	}
+
 	return &pools, nil
+}
+
+// createPoolsFile creates the pools.yaml file with initial content.
+func (c *GitHubClient) createPoolsFile(ctx context.Context, pools *ipam.PoolsConfig) error {
+	content, err := yaml.Marshal(pools)
+	if err != nil {
+		return fmt.Errorf("failed to serialize pools: %w", err)
+	}
+
+	// Add a header comment to the YAML
+	header := []byte("# IPAM Pool Definitions\n# Define your IP address pools here.\n# Example:\n# pools:\n#   my-pool:\n#     cidr:\n#       - \"10.0.0.0/8\"\n#     description: \"My IP pool\"\n#     metadata:\n#       environment: \"production\"\n\n")
+	content = append(header, content...)
+
+	opts := &github.RepositoryContentFileOptions{
+		Message: github.String("Initialize IPAM pools configuration"),
+		Content: content,
+		Branch:  github.String(c.branch),
+	}
+
+	_, _, err = c.client.Repositories.CreateFile(ctx, c.owner, c.repo, c.poolsFile, opts)
+	if err != nil {
+		return fmt.Errorf("failed to create pools file: %w", err)
+	}
+
+	return nil
 }
 
 // GetAllocations reads allocations.json with SHA for OCC.
