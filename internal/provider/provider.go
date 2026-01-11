@@ -53,13 +53,13 @@ func (p *GitIPAMProvider) Metadata(ctx context.Context, req provider.MetadataReq
 func (p *GitIPAMProvider) Schema(ctx context.Context, req provider.SchemaRequest, resp *provider.SchemaResponse) {
 	resp.Schema = schema.Schema{
 		Description: "Git-backed IPAM provider using GitHub API for optimistic concurrency control. " +
-			"Uses a dual-file architecture: pools.yaml (read-only pool definitions) and " +
-			"allocations.json (read-write allocation state).",
+			"Uses a dual-file architecture: pools.yaml (pool definitions) and " +
+			"allocations.json (allocation state).",
 		MarkdownDescription: `Git-backed IPAM provider using GitHub API for optimistic concurrency control.
 
 Uses a dual-file architecture:
-- **pools.yaml** - Read-only pool definitions (managed via PR)
-- **allocations.json** - Read-write allocation state with optimistic concurrency control
+- **pools.yaml** - Pool definitions (managed via ` + "`github-ipam_pool`" + ` resource or PR)
+- **allocations.json** - Allocation state with optimistic concurrency control
 
 This provider enables GitOps-native IP address management without the cost of AWS VPC IPAM.`,
 		Attributes: map[string]schema.Attribute{
@@ -169,6 +169,7 @@ func (p *GitIPAMProvider) Configure(ctx context.Context, req provider.ConfigureR
 func (p *GitIPAMProvider) Resources(ctx context.Context) []func() resource.Resource {
 	return []func() resource.Resource{
 		resources.NewAllocationResource,
+		resources.NewPoolResource,
 	}
 }
 

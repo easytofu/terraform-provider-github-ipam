@@ -52,6 +52,26 @@ func (p *PoolsConfig) ListPoolIDs() []string {
 	return ids
 }
 
+// AddPool adds or updates a pool definition.
+func (p *PoolsConfig) AddPool(poolID string, pool PoolDefinition) {
+	if p.Pools == nil {
+		p.Pools = make(map[string]PoolDefinition)
+	}
+	p.Pools[poolID] = pool
+}
+
+// RemovePool removes a pool by ID. Returns error if pool doesn't exist.
+func (p *PoolsConfig) RemovePool(poolID string) error {
+	if p.Pools == nil {
+		return fmt.Errorf("pool %s not found", poolID)
+	}
+	if _, exists := p.Pools[poolID]; !exists {
+		return fmt.Errorf("pool %s not found", poolID)
+	}
+	delete(p.Pools, poolID)
+	return nil
+}
+
 // ValidatePools ensures all pools have valid CIDRs and no overlaps.
 func (p *PoolsConfig) ValidatePools() error {
 	if p.Pools == nil {

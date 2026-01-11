@@ -111,6 +111,68 @@ func (c *GitHubClient) createPoolsFile(ctx context.Context, pools *ipam.PoolsCon
 	return nil
 }
 
+// GetPoolsWithSHA reads pools.yaml and returns the SHA for OCC updates.
+// If the file doesn't exist, it creates an empty one and returns the new SHA.
+func (c *GitHubClient) GetPoolsWithSHA(ctx context.Context) (*ipam.PoolsConfig, string, error) {
+	fileContent, _, resp, err := c.client.Repositories.GetContents(
+		ctx,
+		c.owner,
+		c.repo,
+		c.poolsFile,
+		&github.RepositoryContentGetOptions{Ref: c.branch},
+	)
+	if err != nil {
+		if resp != nil && resp.StatusCode == 404 {
+			// File doesn't exist, create it with empty pools
+			emptyPools := ipam.NewPoolsConfig()
+			if createErr := c.createPoolsFile(ctx, emptyPools); createErr != nil {
+				return nil, "", fmt.Errorf("pools file not found and failed to create: %w", createErr)
+			}
+			// Fetch again to get the SHA
+			return c.GetPoolsWithSHA(ctx)
+		}
+		return nil, "", fmt.Errorf("failed to get pools file: %w", err)
+	}
+
+	content, err := base64.StdEncoding.DecodeString(*fileContent.Content)
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to decode pools content: %w", err)
+	}
+
+	var pools ipam.PoolsConfig
+	if err := yaml.Unmarshal(content, &pools); err != nil {
+		return nil, "", fmt.Errorf("failed to parse pools YAML: %w", err)
+	}
+
+	// Ensure Pools map is initialized
+	if pools.Pools == nil {
+		pools.Pools = make(map[string]ipam.PoolDefinition)
+	}
+
+	return &pools, *fileContent.SHA, nil
+}
+
+// UpdatePools writes pools.yaml with OCC via SHA.
+func (c *GitHubClient) UpdatePools(ctx context.Context, pools *ipam.PoolsConfig, sha, commitMessage string) error {
+	content, err := yaml.Marshal(pools)
+	if err != nil {
+		return fmt.Errorf("failed to serialize pools: %w", err)
+	}
+
+	opts := &github.RepositoryContentFileOptions{
+		Message: github.String(commitMessage),
+		Content: content,
+		Branch:  github.String(c.branch),
+	}
+
+	if sha != "" {
+		opts.SHA = github.String(sha)
+	}
+
+	_, _, err = c.client.Repositories.UpdateFile(ctx, c.owner, c.repo, c.poolsFile, opts)
+	return err
+}
+
 // GetAllocations reads allocations.json with SHA for OCC.
 func (c *GitHubClient) GetAllocations(ctx context.Context) (*ipam.AllocationsDatabase, string, error) {
 	fileContent, _, resp, err := c.client.Repositories.GetContents(
