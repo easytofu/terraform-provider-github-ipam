@@ -466,6 +466,9 @@ func (r *AllocationResource) Update(ctx context.Context, req resource.UpdateRequ
 
 	retryConfig := client.NewRetryConfig(r.client.MaxRetries(), r.client.BaseDelay().Milliseconds())
 
+	// Capture the CIDR from the database to set in state after update
+	var allocCIDR string
+
 	err := client.WithRetry(ctx, retryConfig, func(ctx context.Context, attempt int) (bool, error) {
 		db, sha, err := r.client.GetAllocations(ctx)
 		if err != nil {
@@ -476,6 +479,9 @@ func (r *AllocationResource) Update(ctx context.Context, req resource.UpdateRequ
 		if !found {
 			return false, fmt.Errorf("allocation %s not found", plan.ID.ValueString())
 		}
+
+		// Capture CIDR for state update
+		allocCIDR = alloc.CIDR
 
 		// Check for duplicate name before making any changes
 		newName := plan.Name.ValueString()
@@ -526,6 +532,9 @@ func (r *AllocationResource) Update(ctx context.Context, req resource.UpdateRequ
 		resp.Diagnostics.AddError("Failed to update allocation", err.Error())
 		return
 	}
+
+	// Set the CIDR from the database (it's immutable, so always use the stored value)
+	plan.CIDR = types.StringValue(allocCIDR)
 
 	// Regenerate README (best effort, don't fail on error)
 	if err := r.client.RegenerateREADME(ctx); err != nil {
