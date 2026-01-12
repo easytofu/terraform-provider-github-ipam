@@ -115,7 +115,9 @@ Exactly one of ` + "`pool_id`" + ` or ` + "`parent_cidr`" + ` must be specified.
 				Computed:            true,
 				Description:         "Allocated CIDR block (computed at apply time).",
 				MarkdownDescription: "Allocated CIDR block (computed at apply time).",
-				// CRITICAL: This remains Unknown during plan phase
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.UseStateForUnknown(),
+				},
 			},
 			"name": schema.StringAttribute{
 				Required:            true,
