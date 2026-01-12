@@ -224,6 +224,11 @@ func (r *AllocationResource) Create(ctx context.Context, req resource.CreateRequ
 			return false, nil
 		}
 
+		// Check for duplicate name
+		if existing, _, found := db.FindAllocationByName(plan.Name.ValueString()); found {
+			return false, fmt.Errorf("allocation name %q already exists (used by allocation %s)", plan.Name.ValueString(), existing.CIDR)
+		}
+
 		var newCIDR string
 		var poolID string
 
@@ -470,8 +475,16 @@ func (r *AllocationResource) Update(ctx context.Context, req resource.UpdateRequ
 			return false, fmt.Errorf("allocation %s not found", plan.ID.ValueString())
 		}
 
+		// Check for duplicate name before making any changes
+		newName := plan.Name.ValueString()
+		if newName != alloc.Name {
+			if existing, _, found := db.FindAllocationByName(newName); found && existing.ID != alloc.ID {
+				return false, fmt.Errorf("cannot rename allocation to %q: name already exists (used by allocation %s)", newName, existing.CIDR)
+			}
+		}
+
 		// Update name
-		alloc.Name = plan.Name.ValueString()
+		alloc.Name = newName
 
 		// Update metadata
 		metadata := make(map[string]string)
