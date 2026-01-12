@@ -411,6 +411,55 @@ func TestPoolPage_NoAllocationHCL(t *testing.T) {
 	}
 }
 
+func TestPoolPage_WithChildAllocations(t *testing.T) {
+	pools := NewPoolsConfig()
+	pools.AddPool("prod", PoolDefinition{CIDR: []string{"10.0.0.0/8"}})
+	allocs := NewAllocationsDatabase()
+
+	// Add parent VPC allocation
+	allocs.AddAllocation("prod", Allocation{
+		CIDR: "10.0.0.0/16",
+		ID:   "vpc-1",
+		Name: "vpc-main",
+	})
+
+	// Add child subnet allocations
+	parentCIDR := "10.0.0.0/16"
+	allocs.AddAllocation("prod", Allocation{
+		CIDR:       "10.0.1.0/24",
+		ID:         "subnet-1",
+		Name:       "subnet-data-az1",
+		ParentCIDR: &parentCIDR,
+	})
+	allocs.AddAllocation("prod", Allocation{
+		CIDR:       "10.0.4.0/22",
+		ID:         "subnet-2",
+		Name:       "subnet-compute-az1",
+		ParentCIDR: &parentCIDR,
+	})
+
+	result := GenerateAllFiles(pools, allocs)
+	poolPage := result.Files[".github/ipam/pools/prod.md"]
+
+	// Should contain parent allocation
+	if !strings.Contains(poolPage, "vpc-main") {
+		t.Error("pool page should contain parent allocation name")
+	}
+
+	// Should contain child allocations with nested indicator
+	if !strings.Contains(poolPage, "subnet-data-az1") {
+		t.Error("pool page should contain child subnet name")
+	}
+	if !strings.Contains(poolPage, "subnet-compute-az1") {
+		t.Error("pool page should contain child subnet name")
+	}
+
+	// Should have nested indicator (└)
+	if !strings.Contains(poolPage, "└") {
+		t.Error("pool page should show nested indicator for child allocations")
+	}
+}
+
 func TestFormatNumber(t *testing.T) {
 	tests := []struct {
 		input    uint64

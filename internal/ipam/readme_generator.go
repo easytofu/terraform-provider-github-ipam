@@ -371,12 +371,24 @@ func generatePoolPage(poolName string, pools *PoolsConfig, allocations *Allocati
 	// Allocations table with available gaps
 	sb.WriteString("## Allocations\n\n")
 
-	// Filter to only top-level allocations (not sub-allocations)
+	// Separate top-level and child allocations
 	var topLevelAllocs []Allocation
+	childAllocsByParent := make(map[string][]Allocation)
 	for _, alloc := range poolAllocs {
 		if alloc.ParentCIDR == nil {
 			topLevelAllocs = append(topLevelAllocs, alloc)
+		} else {
+			childAllocsByParent[*alloc.ParentCIDR] = append(childAllocsByParent[*alloc.ParentCIDR], alloc)
 		}
+	}
+
+	// Sort child allocations by CIDR
+	for parentCIDR := range childAllocsByParent {
+		children := childAllocsByParent[parentCIDR]
+		sort.Slice(children, func(i, j int) bool {
+			return compareCIDRs(children[i].CIDR, children[j].CIDR)
+		})
+		childAllocsByParent[parentCIDR] = children
 	}
 
 	sb.WriteString("| Status | Name | CIDR | Addresses |\n")
@@ -420,6 +432,25 @@ func generatePoolPage(poolName string, pools *PoolsConfig, allocations *Allocati
 			cidrWithRange := fmt.Sprintf("`%s` (%s - %s)", alloc.CIDR, uint32ToIP(aStart), uint32ToIP(aEnd-1))
 			sb.WriteString(fmt.Sprintf("| %s | %s | %s | %s |\n",
 				status, alloc.Name, cidrWithRange, formatNumber(aSize)))
+
+			// Show child allocations (subnets) nested under this allocation
+			if children, hasChildren := childAllocsByParent[alloc.CIDR]; hasChildren {
+				for _, child := range children {
+					_, cNet, _ := net.ParseCIDR(child.CIDR)
+					cStart := ipToUint32(cNet.IP)
+					cSize := cidrToAddresses(child.CIDR)
+					cEnd := cStart + uint32(cSize)
+
+					childStatus := "🔵&nbsp;&nbsp;Allocated"
+					if child.Reserved {
+						childStatus = "🟠&nbsp;&nbsp;Reserved"
+					}
+					childCIDRRange := fmt.Sprintf("`%s` (%s - %s)", child.CIDR, uint32ToIP(cStart), uint32ToIP(cEnd-1))
+					// Indent child name with └ prefix
+					sb.WriteString(fmt.Sprintf("| %s | &nbsp;&nbsp;└&nbsp;%s | %s | %s |\n",
+						childStatus, child.Name, childCIDRRange, formatNumber(cSize)))
+				}
+			}
 
 			current = aEnd
 		}
