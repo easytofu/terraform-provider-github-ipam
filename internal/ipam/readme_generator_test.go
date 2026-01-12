@@ -203,7 +203,7 @@ func TestMainREADME_ContainsTotals(t *testing.T) {
 	}
 }
 
-func TestMainREADME_ContainsHCL(t *testing.T) {
+func TestMainREADME_NoHCL(t *testing.T) {
 	pools := NewPoolsConfig()
 	pools.AddPool("test-pool", PoolDefinition{
 		CIDR:        []string{"10.0.0.0/16"},
@@ -214,11 +214,9 @@ func TestMainREADME_ContainsHCL(t *testing.T) {
 	result := GenerateAllFiles(pools, allocs)
 	readme := result.Files[".github/README.md"]
 
-	if !strings.Contains(readme, "```hcl") {
-		t.Error("README should contain HCL code block")
-	}
-	if !strings.Contains(readme, "resource \"ipam_pool\"") {
-		t.Error("README should contain pool resource HCL")
+	// HCL sections have been removed from documentation
+	if strings.Contains(readme, "```hcl") {
+		t.Error("README should not contain HCL code blocks")
 	}
 }
 
@@ -337,7 +335,7 @@ func TestPoolPage_ReservedBanner(t *testing.T) {
 	}
 }
 
-func TestPoolPage_NoAllocationsMessage(t *testing.T) {
+func TestPoolPage_EmptyPoolShowsAvailable(t *testing.T) {
 	pools := NewPoolsConfig()
 	pools.AddPool("empty", PoolDefinition{CIDR: []string{"10.0.0.0/16"}})
 	allocs := NewAllocationsDatabase()
@@ -345,8 +343,9 @@ func TestPoolPage_NoAllocationsMessage(t *testing.T) {
 	result := GenerateAllFiles(pools, allocs)
 	poolPage := result.Files[".github/ipam/pools/empty.md"]
 
-	if !strings.Contains(poolPage, "No allocations yet") {
-		t.Error("empty pool page should show 'No allocations yet'")
+	// Empty pools should show available space
+	if !strings.Contains(poolPage, "Available") {
+		t.Error("empty pool page should show 'Available' row")
 	}
 }
 
@@ -393,7 +392,7 @@ func TestPoolPage_ReservedAllocationIcon(t *testing.T) {
 	}
 }
 
-func TestPoolPage_AllocationHCL(t *testing.T) {
+func TestPoolPage_NoAllocationHCL(t *testing.T) {
 	pools := NewPoolsConfig()
 	pools.AddPool("prod", PoolDefinition{CIDR: []string{"10.0.0.0/16"}})
 	allocs := NewAllocationsDatabase()
@@ -406,11 +405,9 @@ func TestPoolPage_AllocationHCL(t *testing.T) {
 	result := GenerateAllFiles(pools, allocs)
 	poolPage := result.Files[".github/ipam/pools/prod.md"]
 
-	if !strings.Contains(poolPage, "```hcl") {
-		t.Error("pool page should contain HCL code block")
-	}
-	if !strings.Contains(poolPage, "resource \"ipam_allocation\"") {
-		t.Error("pool page should contain allocation resource HCL")
+	// HCL sections have been removed from documentation
+	if strings.Contains(poolPage, "```hcl") {
+		t.Error("pool page should not contain HCL code blocks")
 	}
 }
 
