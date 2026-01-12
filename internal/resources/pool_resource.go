@@ -333,6 +333,9 @@ func (r *PoolResource) Update(ctx context.Context, req resource.UpdateRequest, r
 
 	retryConfig := client.NewRetryConfig(r.client.MaxRetries(), r.client.BaseDelay().Milliseconds())
 
+	// Capture the CIDR from the database to set in state after update
+	var poolCIDR string
+
 	err := client.WithRetry(ctx, retryConfig, func(ctx context.Context, attempt int) (bool, error) {
 		pools, sha, err := r.client.GetPoolsWithSHA(ctx)
 		if err != nil {
@@ -342,6 +345,11 @@ func (r *PoolResource) Update(ctx context.Context, req resource.UpdateRequest, r
 		existingPool, exists := pools.GetPool(poolName)
 		if !exists {
 			return false, fmt.Errorf("pool %s not found", poolName)
+		}
+
+		// Capture CIDR for state update
+		if len(existingPool.CIDR) > 0 {
+			poolCIDR = existingPool.CIDR[0]
 		}
 
 		// Build metadata map
@@ -376,6 +384,9 @@ func (r *PoolResource) Update(ctx context.Context, req resource.UpdateRequest, r
 		resp.Diagnostics.AddError("Failed to update pool", err.Error())
 		return
 	}
+
+	// Set the CIDR from the database (it's immutable, so always use the stored value)
+	plan.CIDR = types.StringValue(poolCIDR)
 
 	tflog.Info(ctx, "Updated pool", map[string]interface{}{
 		"name": poolName,
