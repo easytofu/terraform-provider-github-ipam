@@ -130,6 +130,9 @@ Exactly one of ` + "`pool_id`" + ` or ` + "`parent_cidr`" + ` must be specified.
 				Computed:            true,
 				Description:         "Status of the allocation: 'allocation' (default) or 'reservation'. Reservations cannot be used for sub-allocations.",
 				MarkdownDescription: "Status of the allocation: `allocation` (default) or `reservation`. Reservations hold space for future use.",
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.UseStateForUnknown(),
+				},
 				Validators: []validator.String{
 					stringvalidator.OneOf("allocation", "reservation"),
 				},
@@ -359,7 +362,7 @@ func (r *AllocationResource) Create(ctx context.Context, req resource.CreateRequ
 
 	plan.ID = types.StringValue(allocationID)
 	plan.CIDR = types.StringValue(allocatedCIDR)
-	if plan.Status.IsNull() {
+	if plan.Status.IsNull() || plan.Status.IsUnknown() {
 		plan.Status = types.StringValue("allocation")
 	}
 
