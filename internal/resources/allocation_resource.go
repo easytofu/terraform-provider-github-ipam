@@ -119,11 +119,8 @@ Exactly one of ` + "`pool_id`" + ` or ` + "`parent_cidr`" + ` must be specified.
 			},
 			"name": schema.StringAttribute{
 				Required:            true,
-				Description:         "Human-readable name for this allocation.",
-				MarkdownDescription: "Human-readable name for this allocation.",
-				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.RequiresReplace(),
-				},
+				Description:         "Human-readable name for this allocation. Can be updated in-place.",
+				MarkdownDescription: "Human-readable name for this allocation. Can be updated in-place.",
 			},
 			"status": schema.StringAttribute{
 				Optional:            true,
@@ -454,9 +451,10 @@ func (r *AllocationResource) Update(ctx context.Context, req resource.UpdateRequ
 		return
 	}
 
-	// Only metadata can be updated (pool_id, parent_cidr, cidr_mask, name all require replace)
-	tflog.Debug(ctx, "Updating allocation metadata", map[string]interface{}{
-		"id": plan.ID.ValueString(),
+	// Name, metadata, and status can be updated in-place
+	tflog.Debug(ctx, "Updating allocation", map[string]interface{}{
+		"id":   plan.ID.ValueString(),
+		"name": plan.Name.ValueString(),
 	})
 
 	retryConfig := client.NewRetryConfig(r.client.MaxRetries(), r.client.BaseDelay().Milliseconds())
@@ -471,6 +469,9 @@ func (r *AllocationResource) Update(ctx context.Context, req resource.UpdateRequ
 		if !found {
 			return false, fmt.Errorf("allocation %s not found", plan.ID.ValueString())
 		}
+
+		// Update name
+		alloc.Name = plan.Name.ValueString()
 
 		// Update metadata
 		metadata := make(map[string]string)
@@ -498,7 +499,7 @@ func (r *AllocationResource) Update(ctx context.Context, req resource.UpdateRequ
 		if alloc.Reserved {
 			action = "update reservation"
 		}
-		commitMsg := fmt.Sprintf("ipam: %s %s (%s)", action, alloc.CIDR, alloc.Name)
+		commitMsg := fmt.Sprintf("ipam: %s %s (%s)", action, alloc.CIDR, plan.Name.ValueString())
 		err = r.client.UpdateAllocations(ctx, db, sha, commitMsg)
 		if r.client.IsConflictError(err) {
 			return true, err
