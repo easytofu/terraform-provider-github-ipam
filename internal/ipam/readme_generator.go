@@ -111,70 +111,6 @@ func generateMainREADME(pools *PoolsConfig, allocations *AllocationsDatabase) st
 			renderUtilBarOnly(totalUtil)))
 
 		sb.WriteString("\n")
-
-		// Generate HCL for pools in this range
-		sb.WriteString("### Terraform Configuration\n\n")
-		sb.WriteString("```hcl\n")
-		sb.WriteString(generateHCLForRange(pools, poolsInRange))
-		sb.WriteString("```\n\n")
-	}
-
-	return sb.String()
-}
-
-func generateHCLForRange(pools *PoolsConfig, poolsInRange []PoolInfo) string {
-	var sb strings.Builder
-
-	if pools == nil || len(poolsInRange) == 0 {
-		return ""
-	}
-
-	// Sort by pool name for consistent output
-	sortedPools := make([]PoolInfo, len(poolsInRange))
-	copy(sortedPools, poolsInRange)
-	sort.Slice(sortedPools, func(i, j int) bool {
-		return sortedPools[i].Name < sortedPools[j].Name
-	})
-
-	for _, info := range sortedPools {
-		poolDef, exists := pools.GetPool(info.Name)
-		if !exists || len(poolDef.CIDR) == 0 {
-			continue
-		}
-
-		// Determine block_size from CIDR
-		_, pNet, _ := net.ParseCIDR(info.CIDR)
-		ones, _ := pNet.Mask.Size()
-
-		// Determine private_range
-		privateRange := "class_a"
-		if strings.HasPrefix(info.CIDR, "172.") {
-			privateRange = "class_b"
-		} else if strings.HasPrefix(info.CIDR, "192.168.") {
-			privateRange = "class_c"
-		}
-
-		sb.WriteString(fmt.Sprintf("resource \"ipam_pool\" %q {\n", info.Name))
-		sb.WriteString(fmt.Sprintf("  name          = %q\n", info.Name))
-		sb.WriteString(fmt.Sprintf("  description   = %q\n", poolDef.Description))
-		sb.WriteString(fmt.Sprintf("  private_range = %q\n", privateRange))
-		sb.WriteString(fmt.Sprintf("  block_size    = %d\n", ones))
-		if poolDef.Reserved {
-			sb.WriteString("  reserved      = true\n")
-		}
-		if len(poolDef.Metadata) > 0 {
-			sb.WriteString("  metadata = {\n")
-			var metaKeys []string
-			for k := range poolDef.Metadata {
-				metaKeys = append(metaKeys, k)
-			}
-			sort.Strings(metaKeys)
-			for _, k := range metaKeys {
-				sb.WriteString(fmt.Sprintf("    %s = %q\n", k, poolDef.Metadata[k]))
-			}
-			sb.WriteString("  }\n")
-		}
-		sb.WriteString("}\n\n")
 	}
 
 	return sb.String()
@@ -432,92 +368,73 @@ func generatePoolPage(poolName string, pools *PoolsConfig, allocations *Allocati
 	}
 	sb.WriteString("\n")
 
-	// Allocations table
+	// Allocations table with available gaps
 	sb.WriteString("## Allocations\n\n")
 
-	if len(poolAllocs) == 0 {
-		sb.WriteString("*No allocations yet*\n\n")
+	// Filter to only top-level allocations (not sub-allocations)
+	var topLevelAllocs []Allocation
+	for _, alloc := range poolAllocs {
+		if alloc.ParentCIDR == nil {
+			topLevelAllocs = append(topLevelAllocs, alloc)
+		}
+	}
+
+	sb.WriteString("| Status | Name | CIDR | Addresses |\n")
+	sb.WriteString("|:-------|:-----|:-----|----------:|\n")
+
+	if len(topLevelAllocs) == 0 {
+		// Show entire pool as available
+		cidrWithRange := fmt.Sprintf("`%s` (%s - %s)", cidr, rangeStart, rangeEnd)
+		sb.WriteString(fmt.Sprintf("| ⚪&nbsp;&nbsp;Available | — | %s | %s |\n",
+			cidrWithRange, formatNumber(poolSize)))
 	} else {
-		// Sort allocations
-		sort.Slice(poolAllocs, func(i, j int) bool {
-			return compareCIDRs(poolAllocs[i].CIDR, poolAllocs[j].CIDR)
+		// Sort allocations by CIDR
+		sort.Slice(topLevelAllocs, func(i, j int) bool {
+			return compareCIDRs(topLevelAllocs[i].CIDR, topLevelAllocs[j].CIDR)
 		})
 
-		sb.WriteString("| Status | Name | CIDR | Addresses |\n")
-		sb.WriteString("|:-------|:-----|:-----|----------:|\n")
+		// Build rows with available gaps
+		current := pStart
+		poolEnd := pStart + uint32(poolSize)
 
-		for _, alloc := range poolAllocs {
+		for _, alloc := range topLevelAllocs {
+			_, aNet, _ := net.ParseCIDR(alloc.CIDR)
+			aStart := ipToUint32(aNet.IP)
+			aSize := cidrToAddresses(alloc.CIDR)
+			aEnd := aStart + uint32(aSize)
+
+			// Show available gap before this allocation
+			if aStart > current {
+				gapSize := aStart - current
+				gapCIDR := findBestCIDR(current, gapSize)
+				gapRange := fmt.Sprintf("`%s` (%s - %s)", gapCIDR, uint32ToIP(current), uint32ToIP(aStart-1))
+				sb.WriteString(fmt.Sprintf("| ⚪&nbsp;&nbsp;Available | — | %s | %s |\n",
+					gapRange, formatNumber(uint64(gapSize))))
+			}
+
+			// Show the allocation
 			status := "🔵&nbsp;&nbsp;Allocated"
 			if alloc.Reserved {
 				status = "🟠&nbsp;&nbsp;Reserved"
 			}
-			_, aNet, _ := net.ParseCIDR(alloc.CIDR)
-			aStart := ipToUint32(aNet.IP)
-			aSize := cidrToAddresses(alloc.CIDR)
-			cidrWithRange := fmt.Sprintf("`%s` (%s - %s)", alloc.CIDR, uint32ToIP(aStart), uint32ToIP(aStart+uint32(aSize)-1))
+			cidrWithRange := fmt.Sprintf("`%s` (%s - %s)", alloc.CIDR, uint32ToIP(aStart), uint32ToIP(aEnd-1))
 			sb.WriteString(fmt.Sprintf("| %s | %s | %s | %s |\n",
 				status, alloc.Name, cidrWithRange, formatNumber(aSize)))
+
+			current = aEnd
 		}
-		sb.WriteString("\n")
+
+		// Show available gap at the end
+		if current < poolEnd {
+			gapSize := poolEnd - current
+			gapCIDR := findBestCIDR(current, gapSize)
+			gapRange := fmt.Sprintf("`%s` (%s - %s)", gapCIDR, uint32ToIP(current), uint32ToIP(poolEnd-1))
+			sb.WriteString(fmt.Sprintf("| ⚪&nbsp;&nbsp;Available | — | %s | %s |\n",
+				gapRange, formatNumber(uint64(gapSize))))
+		}
 	}
 
-	// Generate HCL for allocations in this pool
-	sb.WriteString("## Terraform Configuration\n\n")
-	sb.WriteString("```hcl\n")
-	sb.WriteString(generatePoolAllocationHCL(poolName, poolAllocs))
-	sb.WriteString("```\n")
-
-	return sb.String()
-}
-
-func generatePoolAllocationHCL(poolName string, allocs []Allocation) string {
-	var sb strings.Builder
-
-	for _, alloc := range allocs {
-		// Skip subnets (child allocations)
-		if alloc.ParentCIDR != nil {
-			continue
-		}
-
-		// Create a safe resource name
-		resourceName := strings.ReplaceAll(alloc.Name, " ", "_")
-		resourceName = strings.ReplaceAll(resourceName, "-", "_")
-		resourceName = strings.ReplaceAll(resourceName, "(", "")
-		resourceName = strings.ReplaceAll(resourceName, ")", "")
-		resourceName = strings.ToLower(resourceName)
-
-		// Determine block_size from CIDR
-		_, aNet, _ := net.ParseCIDR(alloc.CIDR)
-		ones, _ := aNet.Mask.Size()
-
-		status := "allocation"
-		if alloc.Reserved {
-			status = "reservation"
-		}
-
-		sb.WriteString(fmt.Sprintf("resource \"ipam_allocation\" %q {\n", resourceName))
-		sb.WriteString(fmt.Sprintf("  name       = %q\n", alloc.Name))
-		sb.WriteString(fmt.Sprintf("  pool       = %q\n", poolName))
-		sb.WriteString(fmt.Sprintf("  block_size = %d\n", ones))
-		sb.WriteString(fmt.Sprintf("  status     = %q\n", status))
-		if len(alloc.Metadata) > 0 {
-			sb.WriteString("  metadata = {\n")
-			var metaKeys []string
-			for k := range alloc.Metadata {
-				metaKeys = append(metaKeys, k)
-			}
-			sort.Strings(metaKeys)
-			for _, k := range metaKeys {
-				sb.WriteString(fmt.Sprintf("    %s = %q\n", k, alloc.Metadata[k]))
-			}
-			sb.WriteString("  }\n")
-		}
-		sb.WriteString("}\n\n")
-	}
-
-	if sb.Len() == 0 {
-		return "# No allocations in this pool\n"
-	}
+	sb.WriteString("\n")
 
 	return sb.String()
 }
