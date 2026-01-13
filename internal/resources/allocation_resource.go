@@ -210,7 +210,7 @@ func (r *AllocationResource) Create(ctx context.Context, req resource.CreateRequ
 			return false, fmt.Errorf("failed to read pools: %w", err)
 		}
 
-		// Read allocations.json with SHA for OCC
+		// Read allocations.yaml with SHA for OCC
 		db, sha, err := r.client.GetAllocations(ctx)
 		if err != nil {
 			return false, fmt.Errorf("failed to read allocations: %w", err)

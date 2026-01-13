@@ -10,7 +10,7 @@ The GitHub IPAM provider enables GitOps-native IP address management by storing 
 
 ## Features
 
-- **Dual-file architecture**: Pool definitions in `pools.yaml` (read-only, managed via PR) and allocations in `allocations.json` (read-write with OCC)
+- **Dual-file architecture**: Pool definitions in `pools.yaml` (read-only, managed via PR) and allocations in `allocations.yaml` (read-write with OCC)
 - **Two allocation modes**:
   - `pool_id`: Allocate from pools defined in pools.yaml
   - `parent_cidr`: Sub-allocate from existing CIDR blocks (hierarchical allocation)
@@ -36,7 +36,7 @@ provider "github-ipam" {
   repository       = "network-config"
   branch           = "main"
   pools_file       = "network/pools.yaml"
-  allocations_file = "network/allocations.json"
+  allocations_file = "network/allocations.yaml"
 }
 
 # Allocate a /16 VPC from a pool
@@ -84,7 +84,7 @@ pools:
       environment: development
 ```
 
-## Allocations State (allocations.json)
+## Allocations State (allocations.yaml)
 
 The provider manages allocation state in a JSON file:
 

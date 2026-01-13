@@ -10,7 +10,7 @@ A Terraform/OpenTofu provider for Git-backed IP Address Management (IPAM) using 
 - **Optimistic Concurrency Control**: Safe concurrent allocations using GitHub API SHA verification
 - **Dual-file Architecture**:
   - `pools.yaml` - Read-only pool definitions (managed via PR)
-  - `allocations.json` - Read-write allocation state
+  - `allocations.yaml` - Read-write allocation state
 - **Two Allocation Modes**:
   - **pool_id**: Allocate from pre-defined pools in pools.yaml
   - **parent_cidr**: Sub-allocate from existing allocations (e.g., subnets within VPCs)
@@ -55,7 +55,7 @@ provider "gitipam" {
   owner             = "my-org"
   repository        = "ipam-config"
   pools_file        = "network/pools.yaml"
-  allocations_file  = "network/allocations.json"
+  allocations_file  = "network/allocations.yaml"
   branch            = "main"
 }
 ```

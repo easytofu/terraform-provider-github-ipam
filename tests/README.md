@@ -62,7 +62,7 @@ Standard test fixtures should include:
 | PROV-011 | Custom branch | Provider uses custom branch | `branch = "develop"` | Provider uses "develop" |
 | PROV-012 | Default pools_file | pools_file defaults to correct path | No `pools_file` specified | `pools_file = "network/pools.yaml"` |
 | PROV-013 | Custom pools_file | Provider uses custom pools file path | `pools_file = "custom/pools.yaml"` | Provider uses custom path |
-| PROV-014 | Default allocations_file | allocations_file defaults correctly | No `allocations_file` specified | `allocations_file = "network/allocations.json"` |
+| PROV-014 | Default allocations_file | allocations_file defaults correctly | No `allocations_file` specified | `allocations_file = "network/allocations.yaml"` |
 | PROV-015 | Custom allocations_file | Provider uses custom allocations path | `allocations_file = "data/allocs.json"` | Provider uses custom path |
 | PROV-016 | Default max_retries | max_retries defaults to 10 | No `max_retries` specified | Client has max_retries = 10 |
 | PROV-017 | Custom max_retries | Provider uses custom retry count | `max_retries = 5` | Client has max_retries = 5 |
@@ -245,11 +245,11 @@ Standard test fixtures should include:
 
 | Test ID | Test Name | Description | Input | Expected Output |
 |---------|-----------|-------------|-------|-----------------|
-| ALLOC-D001 | Delete allocation | No children | Delete allocation | Removed from allocations.json |
+| ALLOC-D001 | Delete allocation | No children | Delete allocation | Removed from allocations.yaml |
 | ALLOC-D002 | Delete already deleted | Allocation doesn't exist | Delete missing | Success (idempotent) |
 | ALLOC-D003 | Delete with children | Has sub-allocations | Delete parent | Error: "has X child allocations" |
 | ALLOC-D004 | Delete leaf child | Child with no grandchildren | Delete leaf | Success |
-| ALLOC-D005 | Delete reservation | Reserved allocation | Delete reservation | Removed from allocations.json |
+| ALLOC-D005 | Delete reservation | Reserved allocation | Delete reservation | Removed from allocations.yaml |
 
 ### 3.8 Import
 
@@ -674,7 +674,7 @@ pools: {}
 ```
 
 ```json
-// allocations.json
+// allocations.yaml
 {
   "version": "1.0",
   "allocations": {}

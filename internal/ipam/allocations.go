@@ -8,23 +8,23 @@ import (
 	"time"
 )
 
-// AllocationsDatabase represents the allocations.json file structure.
+// AllocationsDatabase represents the allocations.yaml file structure.
 // This file is READ-WRITE by the provider with OCC via GitHub SHA.
 type AllocationsDatabase struct {
-	Version     string                  `json:"version"`
-	Allocations map[string][]Allocation `json:"allocations"` // pool_id -> allocations
+	Version     string                  `yaml:"version"`
+	Allocations map[string][]Allocation `yaml:"allocations"` // pool_id -> allocations
 }
 
 // Allocation represents a single CIDR allocation.
 type Allocation struct {
-	CIDR          string            `json:"cidr"`
-	ID            string            `json:"id"`                       // UUID linking to Terraform state
-	Name          string            `json:"name,omitempty"`           // Human-readable name
-	ParentCIDR    *string           `json:"parent_cidr,omitempty"`    // For sub-allocations
-	Metadata      map[string]string `json:"metadata,omitempty"`       // Arbitrary key-value metadata
-	CreatedAt     string            `json:"created_at,omitempty"`     // RFC3339 timestamp
-	Reserved      bool              `json:"reserved,omitempty"`       // True if this is a reservation (cannot be allocated)
-	ContiguousWith *string          `json:"contiguous_with,omitempty"` // CIDR this reservation must be adjacent to
+	CIDR           string            `yaml:"cidr"`
+	ID             string            `yaml:"id"`                        // UUID linking to Terraform state
+	Name           string            `yaml:"name,omitempty"`            // Human-readable name
+	ParentCIDR     *string           `yaml:"parent_cidr,omitempty"`     // For sub-allocations
+	Metadata       map[string]string `yaml:"metadata,omitempty"`        // Arbitrary key-value metadata
+	CreatedAt      string            `yaml:"created_at,omitempty"`      // RFC3339 timestamp
+	Reserved       bool              `yaml:"reserved,omitempty"`        // True if this is a reservation (cannot be allocated)
+	ContiguousWith *string           `yaml:"contiguous_with,omitempty"` // CIDR this reservation must be adjacent to
 }
 
 // NewAllocationsDatabase creates a new empty allocations database.

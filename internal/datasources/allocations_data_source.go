@@ -53,7 +53,7 @@ func (d *AllocationsDataSource) Metadata(ctx context.Context, req datasource.Met
 func (d *AllocationsDataSource) Schema(ctx context.Context, req datasource.SchemaRequest, resp *datasource.SchemaResponse) {
 	resp.Schema = schema.Schema{
 		Description:         "Lists allocations, optionally filtered by pool_id or parent_cidr.",
-		MarkdownDescription: "Lists allocations from `allocations.json`, optionally filtered by `pool_id` or `parent_cidr`.",
+		MarkdownDescription: "Lists allocations from `allocations.yaml`, optionally filtered by `pool_id` or `parent_cidr`.",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
 				Description: "Identifier for this data source.",

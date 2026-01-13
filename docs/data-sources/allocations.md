@@ -7,7 +7,7 @@ description: |-
 
 # github-ipam_allocations (Data Source)
 
-Lists allocations from `allocations.json`, optionally filtered by `pool_id` or `parent_cidr`. Use this data source to discover existing allocations and avoid conflicts.
+Lists allocations from `allocations.yaml`, optionally filtered by `pool_id` or `parent_cidr`. Use this data source to discover existing allocations and avoid conflicts.
 
 ## Example Usage
 

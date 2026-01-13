@@ -6,7 +6,6 @@ package client
 import (
 	"context"
 	"encoding/base64"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -24,7 +23,7 @@ type GitHubClient struct {
 	repo            string
 	branch          string
 	poolsFile       string // Read-only: pools.yaml
-	allocationsFile string // Read-write: allocations.json
+	allocationsFile string // Read-write: allocations.yaml
 	maxRetries      int
 	baseDelay       time.Duration
 }
@@ -179,7 +178,7 @@ func (c *GitHubClient) UpdatePools(ctx context.Context, pools *ipam.PoolsConfig,
 	return err
 }
 
-// GetAllocations reads allocations.json with SHA for OCC.
+// GetAllocations reads allocations.yaml with SHA for OCC.
 func (c *GitHubClient) GetAllocations(ctx context.Context) (*ipam.AllocationsDatabase, string, error) {
 	fileContent, _, resp, err := c.client.Repositories.GetContents(
 		ctx,
@@ -202,17 +201,17 @@ func (c *GitHubClient) GetAllocations(ctx context.Context) (*ipam.AllocationsDat
 	}
 
 	var db ipam.AllocationsDatabase
-	if err := json.Unmarshal(content, &db); err != nil {
-		return nil, "", fmt.Errorf("failed to parse allocations JSON: %w", err)
+	if err := yaml.Unmarshal(content, &db); err != nil {
+		return nil, "", fmt.Errorf("failed to parse allocations YAML: %w", err)
 	}
 
 	return &db, *fileContent.SHA, nil
 }
 
-// UpdateAllocations writes allocations.json with OCC via SHA.
+// UpdateAllocations writes allocations.yaml with OCC via SHA.
 // If SHA is empty (file doesn't exist), creates the file.
 func (c *GitHubClient) UpdateAllocations(ctx context.Context, db *ipam.AllocationsDatabase, sha, commitMessage string) error {
-	content, err := json.MarshalIndent(db, "", "  ")
+	content, err := yaml.Marshal(db)
 	if err != nil {
 		return fmt.Errorf("failed to serialize allocations: %w", err)
 	}

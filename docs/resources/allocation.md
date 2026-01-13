@@ -112,4 +112,4 @@ Allocations can be imported using the allocation ID:
 tofu import github-ipam_allocation.example <allocation-id>
 ```
 
-The allocation ID can be found in the `allocations.json` file in your repository.
+The allocation ID can be found in the `allocations.yaml` file in your repository.

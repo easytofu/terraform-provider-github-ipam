@@ -13,8 +13,8 @@ provider "gitipam" {
   # Path to pools.yaml (read-only pool definitions)
   pools_file = "network/pools.yaml"
 
-  # Path to allocations.json (read-write allocation state)
-  allocations_file = "network/allocations.json"
+  # Path to allocations.yaml (read-write allocation state)
+  allocations_file = "network/allocations.yaml"
 
   # Git branch (default: main)
   branch = "main"

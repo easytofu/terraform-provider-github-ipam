@@ -54,12 +54,12 @@ func (p *GitIPAMProvider) Schema(ctx context.Context, req provider.SchemaRequest
 	resp.Schema = schema.Schema{
 		Description: "Git-backed IPAM provider using GitHub API for optimistic concurrency control. " +
 			"Uses a dual-file architecture: pools.yaml (pool definitions) and " +
-			"allocations.json (allocation state).",
+			"allocations.yaml (allocation state).",
 		MarkdownDescription: `Git-backed IPAM provider using GitHub API for optimistic concurrency control.
 
 Uses a dual-file architecture:
 - **pools.yaml** - Pool definitions (managed via ` + "`github-ipam_pool`" + ` resource or PR)
-- **allocations.json** - Allocation state with optimistic concurrency control
+- **allocations.yaml** - Allocation state with optimistic concurrency control
 
 This provider enables GitOps-native IP address management without the cost of AWS VPC IPAM.`,
 		Attributes: map[string]schema.Attribute{
@@ -94,9 +94,9 @@ This provider enables GitOps-native IP address management without the cost of AW
 				Optional: true,
 			},
 			"allocations_file": schema.StringAttribute{
-				Description: "Path to allocations.json in repository. Defaults to 'network/allocations.json'. " +
+				Description: "Path to allocations.yaml in repository. Defaults to 'network/allocations.yaml'. " +
 					"This file is read-write by the provider with optimistic concurrency control.",
-				MarkdownDescription: "Path to allocations.json in repository. Defaults to `network/allocations.json`. " +
+				MarkdownDescription: "Path to allocations.yaml in repository. Defaults to `network/allocations.yaml`. " +
 					"This file is read-write by the provider with optimistic concurrency control.",
 				Optional: true,
 			},
@@ -134,7 +134,7 @@ func (p *GitIPAMProvider) Configure(ctx context.Context, req provider.ConfigureR
 		poolsFile = config.PoolsFile.ValueString()
 	}
 
-	allocationsFile := "network/allocations.json"
+	allocationsFile := "network/allocations.yaml"
 	if !config.AllocationsFile.IsNull() {
 		allocationsFile = config.AllocationsFile.ValueString()
 	}
