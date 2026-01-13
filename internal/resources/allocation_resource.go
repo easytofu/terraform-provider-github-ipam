@@ -183,16 +183,8 @@ func (r *AllocationResource) Create(ctx context.Context, req resource.CreateRequ
 		return
 	}
 
-	// Generate deterministic UUID for this allocation based on stable configuration
-	// This ensures idempotency across Terraform retries
-	var idInput string
-	if !plan.PoolID.IsNull() {
-		idInput = fmt.Sprintf("pool:%s:name:%s:mask:%d", plan.PoolID.ValueString(), plan.Name.ValueString(), plan.CIDRMask.ValueInt64())
-	} else {
-		idInput = fmt.Sprintf("parent:%s:name:%s:mask:%d", plan.ParentCIDR.ValueString(), plan.Name.ValueString(), plan.CIDRMask.ValueInt64())
-	}
-	// Use UUID v5 with DNS namespace for deterministic generation
-	allocationID := uuid.NewSHA1(uuid.NameSpaceDNS, []byte(idInput)).String()
+	// Generate a unique random UUID for this allocation
+	allocationID := uuid.New().String()
 
 	tflog.Debug(ctx, "Creating allocation", map[string]interface{}{
 		"allocation_id": allocationID,
@@ -214,23 +206,6 @@ func (r *AllocationResource) Create(ctx context.Context, req resource.CreateRequ
 		db, sha, err := r.client.GetAllocations(ctx)
 		if err != nil {
 			return false, fmt.Errorf("failed to read allocations: %w", err)
-		}
-
-		// Idempotency check: see if this ID already exists
-		if existing, _, found := db.FindAllocationByID(allocationID); found {
-			// Verify the existing allocation matches our expected configuration
-			if existing.Name != plan.Name.ValueString() {
-				return false, fmt.Errorf(
-					"ID collision detected: allocation ID %s exists with name %q but expected name %q. "+
-						"This may indicate state corruption - try removing the resource from state with 'tofu state rm' and re-applying",
-					allocationID, existing.Name, plan.Name.ValueString())
-			}
-			allocatedCIDR = existing.CIDR
-			tflog.Debug(ctx, "Allocation already exists (idempotent)", map[string]interface{}{
-				"allocation_id": allocationID,
-				"cidr":          allocatedCIDR,
-			})
-			return false, nil
 		}
 
 		// Check for duplicate name
