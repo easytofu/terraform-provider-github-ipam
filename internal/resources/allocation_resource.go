@@ -218,6 +218,13 @@ func (r *AllocationResource) Create(ctx context.Context, req resource.CreateRequ
 
 		// Idempotency check: see if this ID already exists
 		if existing, _, found := db.FindAllocationByID(allocationID); found {
+			// Verify the existing allocation matches our expected configuration
+			if existing.Name != plan.Name.ValueString() {
+				return false, fmt.Errorf(
+					"ID collision detected: allocation ID %s exists with name %q but expected name %q. "+
+						"This may indicate state corruption - try removing the resource from state with 'tofu state rm' and re-applying",
+					allocationID, existing.Name, plan.Name.ValueString())
+			}
 			allocatedCIDR = existing.CIDR
 			tflog.Debug(ctx, "Allocation already exists (idempotent)", map[string]interface{}{
 				"allocation_id": allocationID,
