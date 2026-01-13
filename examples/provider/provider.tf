@@ -11,10 +11,10 @@ provider "gitipam" {
   repository = "ipam-config"
 
   # Path to pools.yaml (read-only pool definitions)
-  pools_file = "network/pools.yaml"
+  pools_file = "config/pools.yaml"
 
   # Path to allocations.yaml (read-write allocation state)
-  allocations_file = "network/allocations.yaml"
+  allocations_file = "config/allocations.yaml"
 
   # Git branch (default: main)
   branch = "main"

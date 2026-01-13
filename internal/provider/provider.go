@@ -87,16 +87,16 @@ This provider enables GitOps-native IP address management without the cost of AW
 				Optional:            true,
 			},
 			"pools_file": schema.StringAttribute{
-				Description: "Path to pools.yaml in repository. Defaults to 'network/pools.yaml'. " +
+				Description: "Path to pools.yaml in repository. Defaults to 'config/pools.yaml'. " +
 					"This file is read-only by the provider; pool definitions are managed via PR.",
-				MarkdownDescription: "Path to pools.yaml in repository. Defaults to `network/pools.yaml`. " +
+				MarkdownDescription: "Path to pools.yaml in repository. Defaults to `config/pools.yaml`. " +
 					"This file is read-only by the provider; pool definitions are managed via PR.",
 				Optional: true,
 			},
 			"allocations_file": schema.StringAttribute{
-				Description: "Path to allocations.yaml in repository. Defaults to 'network/allocations.yaml'. " +
+				Description: "Path to allocations.yaml in repository. Defaults to 'config/allocations.yaml'. " +
 					"This file is read-write by the provider with optimistic concurrency control.",
-				MarkdownDescription: "Path to allocations.yaml in repository. Defaults to `network/allocations.yaml`. " +
+				MarkdownDescription: "Path to allocations.yaml in repository. Defaults to `config/allocations.yaml`. " +
 					"This file is read-write by the provider with optimistic concurrency control.",
 				Optional: true,
 			},
@@ -129,12 +129,12 @@ func (p *GitIPAMProvider) Configure(ctx context.Context, req provider.ConfigureR
 		branch = config.Branch.ValueString()
 	}
 
-	poolsFile := "network/pools.yaml"
+	poolsFile := "config/pools.yaml"
 	if !config.PoolsFile.IsNull() {
 		poolsFile = config.PoolsFile.ValueString()
 	}
 
-	allocationsFile := "network/allocations.yaml"
+	allocationsFile := "config/allocations.yaml"
 	if !config.AllocationsFile.IsNull() {
 		allocationsFile = config.AllocationsFile.ValueString()
 	}

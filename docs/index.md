@@ -35,8 +35,8 @@ provider "github-ipam" {
   owner            = "my-org"
   repository       = "network-config"
   branch           = "main"
-  pools_file       = "network/pools.yaml"
-  allocations_file = "network/allocations.yaml"
+  pools_file       = "config/pools.yaml"
+  allocations_file = "config/allocations.yaml"
 }
 
 # Allocate a /16 VPC from a pool

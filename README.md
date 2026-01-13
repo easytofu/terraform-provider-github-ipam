@@ -54,8 +54,8 @@ provider "gitipam" {
   token             = var.github_token
   owner             = "my-org"
   repository        = "ipam-config"
-  pools_file        = "network/pools.yaml"
-  allocations_file  = "network/allocations.yaml"
+  pools_file        = "config/pools.yaml"
+  allocations_file  = "config/allocations.yaml"
   branch            = "main"
 }
 ```

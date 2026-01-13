@@ -60,9 +60,9 @@ Standard test fixtures should include:
 |---------|-----------|-------------|-------|-----------------|
 | PROV-010 | Default branch | Branch defaults to "main" | No `branch` specified | `branch = "main"` |
 | PROV-011 | Custom branch | Provider uses custom branch | `branch = "develop"` | Provider uses "develop" |
-| PROV-012 | Default pools_file | pools_file defaults to correct path | No `pools_file` specified | `pools_file = "network/pools.yaml"` |
+| PROV-012 | Default pools_file | pools_file defaults to correct path | No `pools_file` specified | `pools_file = "config/pools.yaml"` |
 | PROV-013 | Custom pools_file | Provider uses custom pools file path | `pools_file = "custom/pools.yaml"` | Provider uses custom path |
-| PROV-014 | Default allocations_file | allocations_file defaults correctly | No `allocations_file` specified | `allocations_file = "network/allocations.yaml"` |
+| PROV-014 | Default allocations_file | allocations_file defaults correctly | No `allocations_file` specified | `allocations_file = "config/allocations.yaml"` |
 | PROV-015 | Custom allocations_file | Provider uses custom allocations path | `allocations_file = "data/allocs.json"` | Provider uses custom path |
 | PROV-016 | Default max_retries | max_retries defaults to 10 | No `max_retries` specified | Client has max_retries = 10 |
 | PROV-017 | Custom max_retries | Provider uses custom retry count | `max_retries = 5` | Client has max_retries = 5 |
